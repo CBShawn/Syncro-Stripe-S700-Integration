@@ -1,0 +1,24 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <style>
+    body { font-family: sans-serif; padding: 15px; width: 320px; }
+    input { width: 100%; padding: 8px; margin-top: 5px; margin-bottom: 12px; box-sizing: border-box; }
+    button { background: #635bff; color: white; border: none; padding: 8px 14px; border-radius: 4px; cursor: pointer; width: 100%; }
+  </style>
+</head>
+<body>
+  <h3>S700 Settings</h3>
+  
+  <label for="apiUrl">Backend API URL:</label>
+  <input type="text" id="apiUrl" placeholder="https://syncro-stripe-s700-integration.onrender.com" />
+  
+  <label for="authKey">Extension Secret Key (Optional):</label>
+  <input type="password" id="authKey" placeholder="Enter secret key if set in Render" />
+
+  <button id="saveBtn">Save Settings</button>
+  <p id="status" style="color: green; font-weight: bold;"></p>
+
+  <script src="options.js"></script>
+</body>
+</html>

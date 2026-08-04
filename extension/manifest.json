@@ -1,0 +1,22 @@
+{
+  "manifest_version": 3,
+  "name": "Syncro S700 Pay & Sign",
+  "version": "1.0",
+  "description": "Trigger Stripe S700 line items, card payments, and signature capture from Syncro MSP.",
+  "permissions": ["activeTab", "storage"],
+  "host_permissions": [
+    "https://*.syncromsp.com/*",
+    "https://*/*"
+  ],
+  "options_ui": {
+    "page": "options.html",
+    "open_in_tab": false
+  },
+  "content_scripts": [
+    {
+      "matches": ["https://*.syncromsp.com/invoices/*"],
+      "js": ["content.js"],
+      "run_at": "document_idle"
+    }
+  ]
+}
