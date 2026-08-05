@@ -8,6 +8,7 @@ const config = require("./config");
 const stripe = require("./services/stripe");
 const syncro = require("./services/syncroService");
 const webhookRoute = require("./routes/webhook");
+const statusRoutes = require("./routes/status");
 
 const {
   invoiceCustomerCache,
@@ -30,6 +31,7 @@ const STRIPE_WEBHOOK_SECRET =
 // =========================================================================
 
 app.use("/api/stripe/webhook", webhookRoute);
+app.use("/", statusRoutes);
 
 app.use(
   cors({
@@ -128,62 +130,6 @@ async function setTerminalReaderDisplay(readerId, lineItems, totalCents, feeSave
 
 app.get("/", (req, res) => {
   res.json({ status: "running", service: "Stripe Invoice & Terminal Middleware" });
-});
-
-app.get('/payment-status/:invoiceId', (req, res) => {
-  const { invoiceId } = req.params;
-  const targetId = String(invoiceId || "").trim();
-
-  // 1. Check direct status map FIRST for completed payment
-  const record = invoicePaymentStatus.get(targetId);
-
-  console.log("🔎 PAYMENT STATUS CHECK:", {
-  invoice: targetId,
-  record,
-  processed: Array.from(processedSyncroPayments)
-});
-  
-  if (record && record.status === "paid" && !record.stage) {
-    return res.json({
-      invoice_id: targetId,
-      status: "paid",
-      amount: record.amount,
-      stripe_invoice_id: record.stripe_invoice_id || "",
-    });
-  }
-
-  // 2. If explicitly in awaiting_signature stage
-  if (record && record.status === "awaiting_signature") {
-    return res.json({
-      invoice_id: targetId,
-      status: "paid",
-      stage: "awaiting_signature",
-    });
-  }
-
-  // 3. Pending signature map lookup fallback
-  const isPendingSig = Array.from(pendingSyncroPayments.values()).some(
-    (p) => String(p.syncroInvoiceId || "").trim() === targetId
-  );
-
-  if (isPendingSig) {
-    return res.json({
-      invoice_id: targetId,
-      status: "paid",
-      stage: "awaiting_signature",
-    });
-  }
-
-  // 4. Processed key set fallback
-  const isProcessed = Array.from(processedSyncroPayments).some((pKey) =>
-    pKey.startsWith(`${targetId}_`)
-  );
-
-  if (isProcessed) {
-    return res.json({ invoice_id: targetId, status: "paid" });
-  }
-
-  res.json({ invoice_id: targetId, status: "pending" });
 });
 
 app.get("/api/signature/:fileId", async (req, res) => {
