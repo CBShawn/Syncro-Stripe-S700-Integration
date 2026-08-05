@@ -22,7 +22,7 @@ const PORT = config.PORT;
 
 
 // =========================================================================
-// ROUTES
+// MIDDLEWARE
 // =========================================================================
 
 app.use(corsMiddleware);
@@ -32,6 +32,10 @@ app.options("*", corsMiddleware);
 app.use(bodyParser);
 
 app.use(logger);
+
+// =========================================================================
+// ROUTES
+// =========================================================================
 
 app.use("/api/stripe/webhook", webhookRoute);
 app.use("/", statusRoutes);
