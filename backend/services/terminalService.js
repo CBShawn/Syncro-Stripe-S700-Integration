@@ -1,4 +1,7 @@
 const axios = require("axios");
+onst {
+  setTerminalReaderDisplay
+} = require("../services/terminalService");
 
 async function setTerminalReaderDisplay(readerId, lineItems, totalCents, feeSaverCents = 0) {
   try {
