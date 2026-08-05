@@ -18,10 +18,6 @@ const {
 
 const app = express();
 
-const config = require("./config");
-const stripe = require("./services/stripe");
-const syncro = require("./services/syncroService");
-
 const PORT = config.PORT;
 
 const STRIPE_WEBHOOK_SECRET =
