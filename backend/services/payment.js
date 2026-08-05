@@ -95,6 +95,27 @@ const syncroResponse = await axios.post(
 
 console.log("===== SYNCRO RESPONSE =====");
 console.log(JSON.stringify(syncroResponse.data, null, 2));
+
+    try {
+  const verifyInvoice = await axios.get(
+    `https://${SYNCRO_SUBDOMAIN}.syncromsp.com/api/v1/invoices/${cleanInvoiceId}?api_key=${SYNCRO_API_KEY}`
+  );
+
+  console.log("===== SYNCRO INVOICE AFTER PAYMENT =====");
+  console.log(JSON.stringify({
+    id: verifyInvoice.data.invoice?.id,
+    status: verifyInvoice.data.invoice?.status,
+    balance_due: verifyInvoice.data.invoice?.balance_due,
+    paid: verifyInvoice.data.invoice?.paid,
+    payment_status: verifyInvoice.data.invoice?.payment_status
+  }, null, 2));
+
+} catch (verifyErr) {
+  console.error(
+    "❌ Syncro invoice verification failed:",
+    verifyErr.response?.data || verifyErr.message
+  );
+}
     
     // Update status cache cleanly & explicitly clear the stage flag
     invoicePaymentStatus.set(cleanInvoiceId, {
