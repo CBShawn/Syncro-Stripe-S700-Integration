@@ -13,7 +13,7 @@ const {
   activeReaderIntents
 } = require("../services/cache");
 
-app.post("/api/terminal/pay-and-sign", async (req, res) => {
+router.post("/pay-and-sign", async (req, res) => {
   try {
     console.log("📥 RAW INCOMING BODY:", JSON.stringify(req.body, null, 2));
 
