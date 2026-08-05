@@ -334,10 +334,10 @@ app.post("/api/terminal/pay-and-sign", async (req, res) => {
     if (!hasExplicitAmount || !syncroCustomerId || !customerEmail || needsLineItems) {
       console.log(`ℹ️ Fetching Invoice #${syncroInvoiceId} directly from Syncro API to fill missing data...`);
       try {
-        const syncroRes = await axios.get(
-          `https://${SYNCRO_SUBDOMAIN}.syncromsp.com/api/v1/invoices/${syncroInvoiceId}?api_key=${SYNCRO_API_KEY}`
-        );
-        const invoiceData = syncroRes.data?.invoice;
+       
+        const invoiceData =
+        await syncro.getInvoice(syncroInvoiceId);
+        
         if (invoiceData) {
           if (!hasExplicitAmount) {
             rawAmount = invoiceData.balance_due !== undefined ? invoiceData.balance_due : invoiceData.total;
