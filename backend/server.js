@@ -32,11 +32,6 @@ const STRIPE_WEBHOOK_SECRET =
 // 1. CORS & MIDDLEWARE
 // =========================================================================
 
-app.use("/api/stripe/webhook", webhookRoute);
-app.use("/", statusRoutes);
-app.use("/", signatureRoutes);
-app.use("/api/terminal", terminalRoutes);
-
 app.use(
   cors({
     origin: true,
@@ -131,6 +126,11 @@ async function setTerminalReaderDisplay(readerId, lineItems, totalCents, feeSave
 // =========================================================================
 // ROUTES
 // =========================================================================
+
+app.use("/api/stripe/webhook", webhookRoute);
+app.use("/", statusRoutes);
+app.use("/", signatureRoutes);
+app.use("/api/terminal", terminalRoutes);
 
 app.get("/", (req, res) => {
   res.json({ status: "running", service: "Stripe Invoice & Terminal Middleware" });
