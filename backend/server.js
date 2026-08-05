@@ -5,20 +5,11 @@ const cors = require("cors");
 const axios = require("axios");
 
 const config = require("./config");
-const stripe = require("./services/stripe");
-const syncro = require("./services/syncroService");
+
 const webhookRoute = require("./routes/webhook");
 const statusRoutes = require("./routes/status");
 const signatureRoutes = require("./routes/signature");
 const terminalRoutes = require("./routes/terminal");
-
-const {
-  invoiceCustomerCache,
-  invoicePaymentStatus,
-  processedSyncroPayments,
-  pendingSyncroPayments,
-  activeReaderIntents
-} = require("./services/cache");
 
 const app = express();
 
