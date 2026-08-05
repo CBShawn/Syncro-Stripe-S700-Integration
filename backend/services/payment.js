@@ -83,10 +83,7 @@ async function recordSyncroPayment(syncroInvoiceId, syncroCustomerId, amountStri
       },
     };
 
-console.log("===== SYNCRO PAYMENT PAYLOAD =====");
-console.log(JSON.stringify(payload, null, 2));
-    
-   await axios.post(
+const syncroResponse = await axios.post(
   `https://${SYNCRO_SUBDOMAIN}.syncromsp.com/api/v1/payments?api_key=${SYNCRO_API_KEY}`,
   payload,
   {
@@ -95,6 +92,9 @@ console.log(JSON.stringify(payload, null, 2));
     },
   }
 );
+
+console.log("===== SYNCRO RESPONSE =====");
+console.log(JSON.stringify(syncroResponse.data, null, 2));
     
     // Update status cache cleanly & explicitly clear the stage flag
     invoicePaymentStatus.set(cleanInvoiceId, {
