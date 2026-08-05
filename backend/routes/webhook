@@ -1,1 +1,21 @@
+const express = require("express");
+const axios = require("axios");
+const Stripe = require("stripe");
 
+const router = express.Router();
+
+const stripe = Stripe(process.env.STRIPE_SECRET_KEY);
+
+const {
+  activeReaderIntents,
+  invoicePaymentStatus,
+  pendingSyncroPayments,
+  invoiceCustomerCache,
+} = require("../services/cache");
+
+const {
+  recordSyncroPayment,
+  clearTerminalReaderDisplay,
+} = require("../services/payment");
+
+const STRIPE_WEBHOOK_SECRET = process.env.STRIPE_WEBHOOK_SECRET;
