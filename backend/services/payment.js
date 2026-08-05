@@ -93,8 +93,20 @@ const syncroResponse = await axios.post(
   }
 );
 
-console.log("===== SYNCRO RESPONSE =====");
-console.log(JSON.stringify(syncroResponse.data, null, 2));
+console.log("===== SYNCRO PAYMENT RESPONSE =====");
+console.log({
+  id: syncroResponse.data?.payment?.id,
+  success: syncroResponse.data?.payment?.success,
+  invoice_ids: syncroResponse.data?.payment?.invoice_ids,
+  amount: syncroResponse.data?.payment?.payment_amount,
+  firstname: syncroResponse.data?.payment?.firstname,
+  lastname: syncroResponse.data?.payment?.lastname,
+  fullname: syncroResponse.data?.payment?.fullname,
+  businessname: syncroResponse.data?.payment?.businessname,
+  email: syncroResponse.data?.payment?.email_address,
+  mobile: syncroResponse.data?.payment?.mobile_phone,
+  firstname: syncroResponse.data?.payment?.firstname,    
+});
 
     try {
   const verifyInvoice = await axios.get(
