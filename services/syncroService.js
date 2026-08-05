@@ -1,49 +1,49 @@
 const axios = require("axios");
-const {
-  SYNCRO_SUBDOMAIN,
-  SYNCRO_API_KEY
-} = require("../config");
+const config = require("../config");
+
+const base =
+`https://${config.SYNCRO_SUBDOMAIN}.syncromsp.com/api/v1`;
 
 
-const syncroBaseUrl =
-  `https://${SYNCRO_SUBDOMAIN}.syncromsp.com/api/v1`;
+async function getInvoice(invoiceId){
 
+  const result =
+    await axios.get(
+      `${base}/invoices/${invoiceId}?api_key=${config.SYNCRO_API_KEY}`
+    );
 
-async function getInvoice(invoiceId) {
-
-  const response = await axios.get(
-    `${syncroBaseUrl}/invoices/${invoiceId}?api_key=${SYNCRO_API_KEY}`
-  );
-
-  return response.data?.invoice || response.data;
-
+  return result.data?.invoice || result.data;
 }
 
 
-async function createPayment(paymentPayload) {
 
-  const response = await axios.post(
-    `${syncroBaseUrl}/payments?api_key=${SYNCRO_API_KEY}`,
-    paymentPayload,
-    {
-      headers: {
-        "Content-Type": "application/json"
+async function createPayment(payload){
+
+  const result =
+    await axios.post(
+      `${base}/payments?api_key=${config.SYNCRO_API_KEY}`,
+      payload,
+      {
+        headers:{
+          "Content-Type":"application/json"
+        }
       }
-    }
-  );
+    );
 
-  return response.data;
+  return result.data;
 
 }
 
 
-async function getCustomer(customerId) {
 
-  const response = await axios.get(
-    `${syncroBaseUrl}/customers/${customerId}?api_key=${SYNCRO_API_KEY}`
-  );
+async function getCustomer(customerId){
 
-  return response.data?.customer || response.data;
+  const result =
+    await axios.get(
+      `${base}/customers/${customerId}?api_key=${config.SYNCRO_API_KEY}`
+    );
+
+  return result.data?.customer || result.data;
 
 }
 
