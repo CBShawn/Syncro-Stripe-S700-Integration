@@ -136,6 +136,13 @@ app.get('/payment-status/:invoiceId', (req, res) => {
 
   // 1. Check direct status map FIRST for completed payment
   const record = invoicePaymentStatus.get(targetId);
+
+  console.log("🔎 PAYMENT STATUS CHECK:", {
+  invoice: targetId,
+  record,
+  processed: Array.from(processedSyncroPayments)
+});
+  
   if (record && record.status === "paid" && !record.stage) {
     return res.json({
       invoice_id: targetId,
