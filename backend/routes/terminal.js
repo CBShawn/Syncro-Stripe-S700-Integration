@@ -160,11 +160,18 @@ router.post("/pay-and-sign", async (req, res) => {
     activeReaderIntents.set(String(readerId), paymentIntent.id);
 
     // 1. Set cart line items on S700 screen in Pre-Dip mode
-    await setTerminalReaderDisplay(readerId, lineItems, totalChargeCents, feeSaverCents);
+    await setTerminalReaderDisplay(
+    readerId,
+    lineItems,
+    totalChargeCents,
+    feeSaverCents
+    );
 
-    // 2. Immediately launch process_payment_intent so the reader accepts card presentation while showing cart
+    // Give the S700 time to render the cart
+    await new Promise(resolve => setTimeout(resolve, 2500));
+
+    // 2. Launch process_payment_intent
     const processPayload = new URLSearchParams();
-    processPayload.append("payment_intent", paymentIntent.id);
 
     await axios.post(
       `https://api.stripe.com/v1/terminal/readers/${readerId}/process_payment_intent`,
