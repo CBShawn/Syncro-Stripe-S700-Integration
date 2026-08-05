@@ -1,24 +1,24 @@
+// Core
 require("dotenv").config();
-
 const express = require("express");
 
+// Config
 const config = require("./config");
 
+// Middleware
+const logger = require("./middleware/logger");
+const corsMiddleware = require("./middleware/cors");
+const bodyParser = require("./middleware/bodyParser");
+
+// Routes
 const webhookRoute = require("./routes/webhook");
 const statusRoutes = require("./routes/status");
 const signatureRoutes = require("./routes/signature");
 const terminalRoutes = require("./routes/terminal");
 
-const logger = require("./middleware/logger");
-const corsMiddleware = require("./middleware/cors");
-const bodyParser = require("./middleware/bodyParser");
-
 const app = express();
 
 const PORT = config.PORT;
-
-
-
 
 
 // =========================================================================
