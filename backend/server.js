@@ -1,3 +1,5 @@
+const app = express();
+
 const config = require("./config");
 
 const stripe = require("./services/stripe");
