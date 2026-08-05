@@ -1,5 +1,5 @@
 const axios = require("axios");
-onst {
+const {
   setTerminalReaderDisplay
 } = require("../services/terminalService");
 
