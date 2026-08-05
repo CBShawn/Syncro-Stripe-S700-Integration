@@ -10,7 +10,18 @@ const SYNCRO_SUBDOMAIN = process.env.SYNCRO_SUBDOMAIN;
 const SYNCRO_API_KEY = process.env.SYNCRO_API_KEY;
 
 async function clearTerminalReaderDisplay(readerId) {
-  console.log(`ℹ️ Reader ${readerId} cleanup skipped (Stripe Terminal has no clear_reader_display endpoint).`);
+  if (!readerId) return;
+
+  try {
+    await stripe.terminal.readers.cancelAction(readerId);
+
+    console.log(`🧹 Reader ${readerId} action cancelled/reset.`);
+  } catch (err) {
+    console.error(
+      "⚠️ Failed to reset reader:",
+      err.response?.data || err.message
+    );
+  }
 }
 
 async function recordSyncroPayment(syncroInvoiceId, syncroCustomerId, amountString, stripePaymentIntentId, stripeInvoiceId, signatureFileId = null) {
