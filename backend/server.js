@@ -10,6 +10,7 @@ const statusRoutes = require("./routes/status");
 const signatureRoutes = require("./routes/signature");
 const terminalRoutes = require("./routes/terminal");
 const { setTerminalReaderDisplay } = require("./services/terminalService");
+const logger = require("./middleware/logger");
 
 const app = express();
 
@@ -52,14 +53,6 @@ app.use((req, res, next) => {
   }
 });
 
-// Request logger
-app.use((req, res, next) => {
-  console.log("===== INCOMING REQUEST =====");
-  console.log(req.method, req.url);
-  next();
-});
-
-
 // =========================================================================
 // ROUTES
 // =========================================================================
@@ -68,6 +61,7 @@ app.use("/api/stripe/webhook", webhookRoute);
 app.use("/", statusRoutes);
 app.use("/", signatureRoutes);
 app.use("/api/terminal", terminalRoutes);
+app.use(logger);
 
 app.get("/", (req, res) => {
   res.json({ status: "running", service: "Stripe Invoice & Terminal Middleware" });
