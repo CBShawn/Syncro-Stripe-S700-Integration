@@ -84,8 +84,16 @@ async function recordSyncroPayment(syncroInvoiceId, syncroCustomerId, amountStri
       },
     };
 
-   await syncro.createPayment(payload);
-
+   await axios.post(
+  `https://${SYNCRO_SUBDOMAIN}.syncromsp.com/api/v1/payments?api_key=${SYNCRO_API_KEY}`,
+  payload,
+  {
+    headers: {
+      "Content-Type": "application/json",
+    },
+  }
+);
+    
     // Update status cache cleanly & explicitly clear the stage flag
     invoicePaymentStatus.set(cleanInvoiceId, {
       status: "paid",
