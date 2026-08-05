@@ -1,3 +1,18 @@
+const express = require("express");
+const router = express.Router();
+
+const { setTerminalReaderDisplay } = require("../services/terminalService");
+const stripe = require("../services/stripe");
+const syncro = require("../services/syncroService");
+
+const {
+  invoiceCustomerCache,
+  invoicePaymentStatus,
+  processedSyncroPayments,
+  pendingSyncroPayments,
+  activeReaderIntents
+} = require("../services/cache");
+
 app.post("/api/terminal/pay-and-sign", async (req, res) => {
   try {
     console.log("📥 RAW INCOMING BODY:", JSON.stringify(req.body, null, 2));
