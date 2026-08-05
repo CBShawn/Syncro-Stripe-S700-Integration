@@ -24,8 +24,8 @@ const STRIPE_WEBHOOK_SECRET = process.env.STRIPE_WEBHOOK_SECRET;
 // WEBHOOK HANDLER
 // =========================================================================
 
-app.post(
-  "/api/stripe/webhook",
+router.post(
+  "/",
   express.raw({ type: "application/json" }),
   async (req, res) => {
     const sig = req.headers["stripe-signature"];
