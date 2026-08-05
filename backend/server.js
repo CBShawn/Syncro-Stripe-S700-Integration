@@ -1,9 +1,24 @@
-const app = express();
+require("dotenv").config();
+
+const express = require("express");
+const cors = require("cors");
+const axios = require("axios");
 
 const config = require("./config");
-
 const stripe = require("./services/stripe");
+const syncro = require("./services/syncroService");
 
+const {
+  invoiceCustomerCache,
+  invoicePaymentStatus,
+  processedSyncroPayments,
+  pendingSyncroPayments,
+  activeReaderIntents
+} = require("./cache");
+
+const app = express();
+const config = require("./config");
+const stripe = require("./services/stripe");
 const syncro = require("./services/syncroService");
 
 const {
