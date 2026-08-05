@@ -1,17 +1,22 @@
-require("dotenv").config();
+const config = require("./config");
 
-const express = require("express");
-const cors = require("cors");
-const axios = require("axios");
-const Stripe = require("stripe");
+const stripe = require("./services/stripe");
 
-const stripe = Stripe(process.env.STRIPE_SECRET_KEY);
-const app = express();
+const syncro = require("./services/syncroService");
 
-const PORT = process.env.PORT || 3000;
-const SYNCRO_SUBDOMAIN = process.env.SYNCRO_SUBDOMAIN;
-const SYNCRO_API_KEY = process.env.SYNCRO_API_KEY;
-const STRIPE_WEBHOOK_SECRET = process.env.STRIPE_WEBHOOK_SECRET;
+const {
+  invoiceCustomerCache,
+  invoicePaymentStatus,
+  processedSyncroPayments,
+  pendingSyncroPayments,
+  activeReaderIntents
+} = require("./cache");
+
+
+const PORT = config.PORT;
+
+const STRIPE_WEBHOOK_SECRET =
+  config.STRIPE_WEBHOOK_SECRET;
 
 // In-memory caches
 const invoiceCustomerCache = new Map();
