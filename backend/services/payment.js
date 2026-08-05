@@ -10,22 +10,7 @@ const SYNCRO_SUBDOMAIN = process.env.SYNCRO_SUBDOMAIN;
 const SYNCRO_API_KEY = process.env.SYNCRO_API_KEY;
 
 async function clearTerminalReaderDisplay(readerId) {
-  if (!readerId) return;
-  try {
-    await axios.post(
-      `https://api.stripe.com/v1/terminal/readers/${readerId}/clear_reader_display`,
-      "",
-      {
-        headers: {
-          Authorization: `Bearer ${process.env.STRIPE_SECRET_KEY}`,
-          "Content-Type": "application/x-www-form-urlencoded",
-        },
-      }
-    );
-    console.log(`🧹 Reader ${readerId} display cleared.`);
-  } catch (err) {
-    console.error("⚠️ Failed to clear reader display:", err.response?.data || err.message);
-  }
+  console.log(`ℹ️ Reader ${readerId} cleanup skipped (Stripe Terminal has no clear_reader_display endpoint).`);
 }
 
 async function recordSyncroPayment(syncroInvoiceId, syncroCustomerId, amountString, stripePaymentIntentId, stripeInvoiceId, signatureFileId = null) {
