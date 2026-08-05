@@ -168,7 +168,7 @@ router.post("/pay-and-sign", async (req, res) => {
     );
 
     // Give the S700 time to render the cart
-    await new Promise(resolve => setTimeout(resolve, 2500));
+    await new Promise(resolve => setTimeout(resolve, 5000));
 
     // 2. Launch process_payment_intent
     const processPayload = new URLSearchParams();
