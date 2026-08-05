@@ -7,6 +7,7 @@ const axios = require("axios");
 const config = require("./config");
 const stripe = require("./services/stripe");
 const syncro = require("./services/syncroService");
+const webhookRoute = require("./routes/webhook");
 
 const {
   invoiceCustomerCache,
@@ -27,6 +28,8 @@ const STRIPE_WEBHOOK_SECRET =
 // =========================================================================
 // 1. CORS & MIDDLEWARE
 // =========================================================================
+
+app.use("/api/stripe/webhook", webhookRoute);
 
 app.use(
   cors({
