@@ -15,7 +15,7 @@ const {
   processedSyncroPayments,
   pendingSyncroPayments,
   activeReaderIntents
-} = require("./cache");
+} = require("./services/cache");
 
 const app = express();
 
