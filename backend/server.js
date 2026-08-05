@@ -176,25 +176,21 @@ async function recordSyncroPayment({
       .filter(Boolean)
       .join("\n");
 
+    // REVISED PAYLOAD SCHEMA WITH APPLY_PAYMENTS MAPPING
     const payload = {
       payment: {
-        customer_id: isNaN(parsedCustomerId) ? 0 : parsedCustomerId,
+        ...(parsedCustomerId > 0 && { customer_id: parsedCustomerId }),
         invoice_id: parsedInvoiceId,
-        amount: amountFloat,
         amount_cents: totalCents,
-        payment_method: "Credit Card",
+        payment_method: "Credit Card", 
         ref_num: referenceString,
         applied_at: new Date().toISOString(),
         ...(cardLast4 && { credit_card_number: cardLast4 }),
         ...(cardBrand && { card_type: cardBrand }),
         notes: noteLines,
-        invoice_payments_attributes: [
-          {
-            invoice_id: parsedInvoiceId,
-            amount: amountFloat,
-            payment_amount: amountFloat,
-          },
-        ],
+        apply_payments: {
+          [cleanInvoiceId]: amountFloat.toFixed(2),
+        },
       },
     };
 
