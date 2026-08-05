@@ -3,12 +3,12 @@ require("dotenv").config();
 const express = require("express");
 
 const config = require("./config");
-const corsMiddleware = require("./middleware/cors");
+
 const webhookRoute = require("./routes/webhook");
 const statusRoutes = require("./routes/status");
 const signatureRoutes = require("./routes/signature");
 const terminalRoutes = require("./routes/terminal");
-const { setTerminalReaderDisplay } = require("./services/terminalService");
+
 const logger = require("./middleware/logger");
 const corsMiddleware = require("./middleware/cors");
 const bodyParser = require("./middleware/bodyParser");
