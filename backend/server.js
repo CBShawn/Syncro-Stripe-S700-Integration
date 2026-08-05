@@ -17,18 +17,10 @@ const {
 } = require("./cache");
 
 const app = express();
+
 const config = require("./config");
 const stripe = require("./services/stripe");
 const syncro = require("./services/syncroService");
-
-const {
-  invoiceCustomerCache,
-  invoicePaymentStatus,
-  processedSyncroPayments,
-  pendingSyncroPayments,
-  activeReaderIntents
-} = require("./cache");
-
 
 const PORT = config.PORT;
 
