@@ -83,6 +83,9 @@ async function recordSyncroPayment(syncroInvoiceId, syncroCustomerId, amountStri
       },
     };
 
+console.log("===== SYNCRO PAYMENT PAYLOAD =====");
+console.log(JSON.stringify(payload, null, 2));
+    
    await axios.post(
   `https://${SYNCRO_SUBDOMAIN}.syncromsp.com/api/v1/payments?api_key=${SYNCRO_API_KEY}`,
   payload,
