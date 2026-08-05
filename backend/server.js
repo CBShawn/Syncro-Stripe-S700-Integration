@@ -18,6 +18,7 @@ const invoiceCustomerCache = new Map();
 const invoicePaymentStatus = new Map();
 const processedSyncroPayments = new Set();
 const pendingSyncroPayments = new Map();
+const activeReaderIntents = new Map(); // Tracks PaymentIntent per reader for native pre-dip card presentation
 
 // =========================================================================
 // 1. CORS & MIDDLEWARE
@@ -108,7 +109,7 @@ async function setTerminalReaderDisplay(readerId, lineItems, totalCents, feeSave
         },
       }
     );
-    console.log(`📱 Reader screen updated with ${items.length} line item(s).`);
+    console.log(`📱 Reader screen updated with ${items.length} line item(s) (Pre-Dip Ready).`);
   } catch (err) {
     console.error("⚠️ Failed to set reader display:", err.response?.data || err.message);
   }
@@ -382,7 +383,7 @@ app.post("/api/terminal/pay-and-sign", async (req, res) => {
     const feeSaverCents = parseInt(feeSaverAmount, 10) || 0;
     const totalChargeCents = amountCents + feeSaverCents;
 
-    console.log(`▶ Initiating Terminal Payment for Invoice #${syncroInvoiceId} ($${(totalChargeCents / 100).toFixed(2)}) on Reader: ${readerId}`);
+    console.log(`▶ Initiating Pre-Dip Cart Display for Invoice #${syncroInvoiceId} ($${(totalChargeCents / 100).toFixed(2)}) on Reader: ${readerId}`);
 
     const safeSyncroCustomerId = (syncroCustomerId && syncroCustomerId !== "undefined") 
       ? String(syncroCustomerId).trim() 
@@ -438,10 +439,13 @@ app.post("/api/terminal/pay-and-sign", async (req, res) => {
       },
     });
 
-    // 1. Set line items on S700 screen display
+    // Store PaymentIntent ID mapped to reader for pre-dip card trigger
+    activeReaderIntents.set(String(readerId), paymentIntent.id);
+
+    // 1. Set cart line items on S700 screen in Pre-Dip mode
     await setTerminalReaderDisplay(readerId, lineItems, totalChargeCents, feeSaverCents);
 
-    // 2. Trigger card prompt directly over the active display
+    // 2. Immediately launch process_payment_intent so the reader accepts card presentation while showing cart
     const processPayload = new URLSearchParams();
     processPayload.append("payment_intent", paymentIntent.id);
 
@@ -456,7 +460,7 @@ app.post("/api/terminal/pay-and-sign", async (req, res) => {
       }
     );
 
-    console.log(`✅ Sent PaymentIntent (${paymentIntent.id}) to Terminal Reader ${readerId}`);
+    console.log(`✅ Cart display and pre-dip payment intent (${paymentIntent.id}) active on Reader ${readerId}`);
 
     return res.json({
       success: true,
@@ -495,7 +499,37 @@ app.post(
     console.log(`✅ Webhook Received: ${event.type}`);
 
     try {
-      // 1. PAYMENT SUCCEEDED
+      // 1. CARD PRESENTED / READ DURING PRE-DIP
+      if (event.type === "terminal.reader.action_succeeded") {
+        const readerObj = event.data.object;
+        const readerId = String(readerObj.id);
+        const activeIntentId = activeReaderIntents.get(readerId);
+
+        if (activeIntentId) {
+          console.log(`💳 Card presented on Reader ${readerId}. Executing active PaymentIntent ${activeIntentId}...`);
+          activeReaderIntents.delete(readerId);
+
+          const processPayload = new URLSearchParams();
+          processPayload.append("payment_intent", activeIntentId);
+
+          try {
+            await axios.post(
+              `https://api.stripe.com/v1/terminal/readers/${readerId}/process_payment_intent`,
+              processPayload.toString(),
+              {
+                headers: {
+                  Authorization: `Bearer ${process.env.STRIPE_SECRET_KEY}`,
+                  "Content-Type": "application/x-www-form-urlencoded",
+                },
+              }
+            );
+          } catch (procErr) {
+            console.warn("ℹ️ Payment intent already processing or completed:", procErr.response?.data || procErr.message);
+          }
+        }
+      }
+
+      // 2. PAYMENT SUCCEEDED
       if (event.type === "payment_intent.succeeded") {
         const pi = event.data.object;
         const metadata = pi.metadata || {};
@@ -636,7 +670,7 @@ app.post(
         }
       }
 
-      // 2. SIGNATURE COLLECTED
+      // 3. SIGNATURE COLLECTED
       if (event.type === "terminal.reader.action_succeeded") {
         const readerObj = event.data.object;
         const action = readerObj.action || {};
