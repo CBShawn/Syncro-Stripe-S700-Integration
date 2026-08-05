@@ -18,12 +18,6 @@ const PORT = config.PORT;
 const STRIPE_WEBHOOK_SECRET =
   config.STRIPE_WEBHOOK_SECRET;
 
-// In-memory caches
-const invoiceCustomerCache = new Map();
-const invoicePaymentStatus = new Map();
-const processedSyncroPayments = new Set();
-const pendingSyncroPayments = new Map();
-const activeReaderIntents = new Map(); // Tracks PaymentIntent per reader for native pre-dip card presentation
 
 // =========================================================================
 // 1. CORS & MIDDLEWARE
