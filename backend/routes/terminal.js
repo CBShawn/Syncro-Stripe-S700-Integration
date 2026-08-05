@@ -173,6 +173,16 @@ router.post("/pay-and-sign", async (req, res) => {
     // 2. Launch process_payment_intent
     const processPayload = new URLSearchParams();
 
+    processPayload.append(
+  "payment_intent",
+  paymentIntent.id
+);
+
+console.log(
+  "🚀 PROCESS PAYMENT PAYLOAD:",
+  processPayload.toString()
+);
+
     await axios.post(
       `https://api.stripe.com/v1/terminal/readers/${readerId}/process_payment_intent`,
       processPayload.toString(),
