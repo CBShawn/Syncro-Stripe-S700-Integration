@@ -9,6 +9,8 @@ const stripe = require("./services/stripe");
 const syncro = require("./services/syncroService");
 const webhookRoute = require("./routes/webhook");
 const statusRoutes = require("./routes/status");
+const signatureRoutes = require("./routes/signature");
+const terminalRoutes = require("./routes/terminal");
 
 const {
   invoiceCustomerCache,
@@ -32,6 +34,8 @@ const STRIPE_WEBHOOK_SECRET =
 
 app.use("/api/stripe/webhook", webhookRoute);
 app.use("/", statusRoutes);
+app.use("/", signatureRoutes);
+app.use("/api/terminal", terminalRoutes);
 
 app.use(
   cors({
