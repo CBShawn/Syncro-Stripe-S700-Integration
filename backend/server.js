@@ -25,16 +25,18 @@ const PORT = config.PORT;
 // ROUTES
 // =========================================================================
 
-app.use("/api/stripe/webhook", webhookRoute);
-app.use("/", statusRoutes);
-app.use("/", signatureRoutes);
-app.use("/api/terminal", terminalRoutes);
-app.use(logger);
 app.use(corsMiddleware);
 
 app.options("*", corsMiddleware);
 
 app.use(bodyParser);
+
+app.use(logger);
+
+app.use("/api/stripe/webhook", webhookRoute);
+app.use("/", statusRoutes);
+app.use("/", signatureRoutes);
+app.use("/api/terminal", terminalRoutes);
 
 app.get("/", (req, res) => {
   res.json({ status: "running", service: "Stripe Invoice & Terminal Middleware" });
