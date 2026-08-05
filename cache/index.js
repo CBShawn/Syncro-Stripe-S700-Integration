@@ -1,19 +1,13 @@
-const invoiceCustomerCache = new Map();
-
-const invoicePaymentStatus = new Map();
-
-const processedSyncroPayments = new Set();
-
-const pendingSyncroPayments = new Map();
-
 module.exports = {
 
-    invoiceCustomerCache,
+  invoiceCustomerCache: new Map(),
 
-    invoicePaymentStatus,
+  invoicePaymentStatus: new Map(),
 
-    processedSyncroPayments,
+  processedSyncroPayments: new Set(),
 
-    pendingSyncroPayments
+  pendingSyncroPayments: new Map(),
+
+  activeReaderIntents: new Map()
 
 };
