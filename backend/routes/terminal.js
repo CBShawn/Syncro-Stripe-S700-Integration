@@ -190,3 +190,5 @@ router.post("/pay-and-sign", async (req, res) => {
   }
 });
 
+module.exports = router;
+
