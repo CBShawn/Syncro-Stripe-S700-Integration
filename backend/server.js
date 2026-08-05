@@ -18,7 +18,6 @@ const invoiceCustomerCache = new Map();
 const invoicePaymentStatus = new Map();
 const processedSyncroPayments = new Set();
 const pendingSyncroPayments = new Map();
-const activeReaderIntents = new Map(); // Tracks PaymentIntent per reader for the Continue button flow
 
 // =========================================================================
 // 1. CORS & MIDDLEWARE
@@ -112,37 +111,6 @@ async function setTerminalReaderDisplay(readerId, lineItems, totalCents, feeSave
     console.log(`📱 Reader screen updated with ${items.length} line item(s).`);
   } catch (err) {
     console.error("⚠️ Failed to set reader display:", err.response?.data || err.message);
-  }
-}
-
-async function showCartWithContinuePrompt(readerId, lineItems, totalChargeCents, feeSaverCents = 0, paymentIntentId = "") {
-  try {
-    // 1. Send Cart Line Items to Display
-    await setTerminalReaderDisplay(readerId, lineItems, totalChargeCents, feeSaverCents);
-
-    // 2. Present "Continue to Payment" button on S700 screen
-    const inputPayload = new URLSearchParams();
-    inputPayload.append("inputs[0][type]", "selection");
-    inputPayload.append("inputs[0][custom_text][title]", "Review Your Order");
-    inputPayload.append("inputs[0][custom_text][description]", `Total Due: $${(totalChargeCents / 100).toFixed(2)}`);
-    inputPayload.append("inputs[0][selection][choices][0][id]", "continue_to_pay");
-    inputPayload.append("inputs[0][selection][choices][0][text]", "Continue to Payment");
-    inputPayload.append("inputs[0][selection][choices][0][style]", "primary");
-    inputPayload.append("metadata[payment_intent_id]", paymentIntentId);
-
-    await axios.post(
-      `https://api.stripe.com/v1/terminal/readers/${readerId}/collect_inputs`,
-      inputPayload.toString(),
-      {
-        headers: {
-          Authorization: `Bearer ${process.env.STRIPE_SECRET_KEY}`,
-          "Content-Type": "application/x-www-form-urlencoded",
-        },
-      }
-    );
-    console.log(`📱 Cart display & 'Continue to Payment' prompt active on Reader ${readerId}`);
-  } catch (err) {
-    console.error("❌ Error setting cart continue prompt:", err.response?.data || err.message);
   }
 }
 
@@ -470,17 +438,31 @@ app.post("/api/terminal/pay-and-sign", async (req, res) => {
       },
     });
 
-    // Save intent in memory for reader continuation
-    activeReaderIntents.set(String(readerId), paymentIntent.id);
+    // 1. Set line items on S700 screen display
+    await setTerminalReaderDisplay(readerId, lineItems, totalChargeCents, feeSaverCents);
 
-    // Present cart line items and "Continue to Payment" button on S700
-    await showCartWithContinuePrompt(readerId, lineItems, totalChargeCents, feeSaverCents, paymentIntent.id);
+    // 2. Trigger card prompt directly over the active display
+    const processPayload = new URLSearchParams();
+    processPayload.append("payment_intent", paymentIntent.id);
+
+    await axios.post(
+      `https://api.stripe.com/v1/terminal/readers/${readerId}/process_payment_intent`,
+      processPayload.toString(),
+      {
+        headers: {
+          Authorization: `Bearer ${process.env.STRIPE_SECRET_KEY}`,
+          "Content-Type": "application/x-www-form-urlencoded",
+        },
+      }
+    );
+
+    console.log(`✅ Sent PaymentIntent (${paymentIntent.id}) to Terminal Reader ${readerId}`);
 
     return res.json({
       success: true,
       paymentIntentId: paymentIntent.id,
       syncroInvoiceId: syncroInvoiceId,
-      status: "awaiting_customer_continue",
+      status: "payment_initiated",
     });
   } catch (err) {
     console.error("❌ Error on /pay-and-sign:", err.response?.data || err.message);
@@ -513,47 +495,7 @@ app.post(
     console.log(`✅ Webhook Received: ${event.type}`);
 
     try {
-      // 1. CUSTOMER TAPPED "CONTINUE TO PAYMENT" ON S700
-      if (event.type === "terminal.reader.action_succeeded") {
-        const readerObj = event.data.object;
-        const action = readerObj.action || {};
-
-        let continueTapped = false;
-        const inputs = action.collect_inputs?.inputs || action.process_input?.inputs || [];
-        for (const input of inputs) {
-          if (input.type === "selection" && (input.selection?.value === "continue_to_pay" || input.selection === "continue_to_pay")) {
-            continueTapped = true;
-            break;
-          }
-        }
-
-        if (continueTapped) {
-          const metadata = action.collect_inputs?.metadata || readerObj.metadata || {};
-          const paymentIntentId = metadata.payment_intent_id || activeReaderIntents.get(String(readerObj.id));
-
-          if (paymentIntentId) {
-            console.log(`👉 Customer pressed Continue on reader ${readerObj.id}. Launching card payment prompt...`);
-            activeReaderIntents.delete(String(readerObj.id));
-
-            const processPayload = new URLSearchParams();
-            processPayload.append("payment_intent", paymentIntentId);
-
-            await axios.post(
-              `https://api.stripe.com/v1/terminal/readers/${readerObj.id}/process_payment_intent`,
-              processPayload.toString(),
-              {
-                headers: {
-                  Authorization: `Bearer ${process.env.STRIPE_SECRET_KEY}`,
-                  "Content-Type": "application/x-www-form-urlencoded",
-                },
-              }
-            );
-          }
-          return res.json({ received: true });
-        }
-      }
-
-      // 2. PAYMENT SUCCEEDED
+      // 1. PAYMENT SUCCEEDED
       if (event.type === "payment_intent.succeeded") {
         const pi = event.data.object;
         const metadata = pi.metadata || {};
@@ -694,7 +636,7 @@ app.post(
         }
       }
 
-      // 3. SIGNATURE COLLECTED
+      // 2. SIGNATURE COLLECTED
       if (event.type === "terminal.reader.action_succeeded") {
         const readerObj = event.data.object;
         const action = readerObj.action || {};
