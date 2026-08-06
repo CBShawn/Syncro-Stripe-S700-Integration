@@ -115,12 +115,12 @@ console.log({
   success: syncroResponse.data?.payment?.success,
   invoice_ids: syncroResponse.data?.payment?.invoice_ids,
   amount: syncroResponse.data?.payment?.payment_amount,
-  firstname: syncroResponse.data?.payment?.firstname,
-  lastname: syncroResponse.data?.payment?.lastname,
-  fullname: syncroResponse.data?.payment?.fullname,
-  businessname: syncroResponse.data?.payment?.businessname,
-  email: syncroResponse.data?.payment?.email_address,
-  mobile: syncroResponse.data?.payment?.mobile_phone,    
+  firstname: customerData.firstname,
+  lastname: customerData.lastname,
+  fullname: customerData.fullname,
+  businessname: customerData.business_name,
+  email: customerData.email,
+  mobile: customerData.mobile_phone,    
 });
 
     try {
