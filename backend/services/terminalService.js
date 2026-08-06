@@ -86,7 +86,3 @@ module.exports = {
   setTerminalReaderDisplay,
   setReaderMessage
 };
-
-module.exports = {
-  setTerminalReaderDisplay
-};
