@@ -93,6 +93,22 @@ const syncroResponse = await axios.post(
   }
 );
 
+    let customerData = {};
+
+try {
+  const customerResponse = await axios.get(
+    `https://${SYNCRO_SUBDOMAIN}.syncromsp.com/api/v1/customers/${parsedCustomerId}?api_key=${SYNCRO_API_KEY}`
+  );
+
+  customerData = customerResponse.data?.customer || {};
+
+} catch (customerErr) {
+  console.error(
+    "⚠️ Failed to fetch Syncro customer:",
+    customerErr.response?.data || customerErr.message
+  );
+}
+    
 console.log("===== SYNCRO PAYMENT RESPONSE =====");
 console.log({
   id: syncroResponse.data?.payment?.id,
@@ -104,8 +120,7 @@ console.log({
   fullname: syncroResponse.data?.payment?.fullname,
   businessname: syncroResponse.data?.payment?.businessname,
   email: syncroResponse.data?.payment?.email_address,
-  mobile: syncroResponse.data?.payment?.mobile_phone,
-  firstname: syncroResponse.data?.payment?.firstname,    
+  mobile: syncroResponse.data?.payment?.mobile_phone,    
 });
 
     try {
