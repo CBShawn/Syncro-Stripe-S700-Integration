@@ -2,7 +2,10 @@ const express = require("express");
 const router = express.Router();
 const axios = require("axios");
 
-const { setTerminalReaderDisplay } = require("../services/terminalService");
+const { 
+  setTerminalReaderDisplay,
+  setReaderMessage
+} = require("../services/terminalService");
 const stripe = require("../services/stripe");
 const syncro = require("../services/syncroService");
 
