@@ -83,5 +83,10 @@ async function setTerminalReaderDisplay(readerId, lineItems, totalCents, feeSave
 }
 
 module.exports = {
+  setTerminalReaderDisplay,
+  setReaderMessage
+};
+
+module.exports = {
   setTerminalReaderDisplay
 };
