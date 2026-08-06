@@ -105,9 +105,10 @@ router.post(
           }
         }
 
-        // CASE B: else if (actionType === "process_payment_intent") {
-                  console.log(`ℹ️ Payment processing completed on Reader ${readerId}`);
-                  }
+       // CASE B: Payment processing completed
+else if (actionType === "process_payment_intent") {
+  console.log(`ℹ️ Payment processing completed on Reader ${readerId}`);
+}
 
         // CASE C: Other action types (ignore or log)
         else {
