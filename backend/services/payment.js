@@ -108,20 +108,12 @@ try {
     customerErr.response?.data || customerErr.message
   );
 }
-    
+   
 console.log("===== SYNCRO PAYMENT RESPONSE =====");
-console.log({
-  id: syncroResponse.data?.payment?.id,
-  success: syncroResponse.data?.payment?.success,
-  invoice_ids: syncroResponse.data?.payment?.invoice_ids,
-  amount: syncroResponse.data?.payment?.payment_amount,
-  firstname: customerData.firstname,
-  lastname: customerData.lastname,
-  fullname: customerData.fullname,
-  businessname: customerData.business_name,
-  email: customerData.email,
-  mobile: customerData.mobile_phone,    
-});
+console.log(JSON.stringify(syncroResponse.data, null, 2));
+
+console.log("===== PAYMENT OBJECT KEYS =====");
+console.log(Object.keys(syncroResponse.data?.payment || {}));
 
     try {
   const verifyInvoice = await axios.get(
