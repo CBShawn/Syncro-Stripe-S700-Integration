@@ -173,9 +173,10 @@ router.post("/pay-and-sign", async (req, res) => {
 await new Promise(resolve => setTimeout(resolve, 5000));
 
 // Update screen before switching to payment mode
+// transition screen
 await setReaderMessage(
   readerId,
-  "Please wait...Preparing payment"
+  "Please wait while payment is being processed"
 );
 
 // Start payment collection
