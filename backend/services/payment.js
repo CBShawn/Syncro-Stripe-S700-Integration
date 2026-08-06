@@ -47,6 +47,26 @@ async function recordSyncroPayment(syncroInvoiceId, syncroCustomerId, amountStri
     const amountFloat = parseFloat(amountString) || 0;
     const totalCents = Math.round(amountFloat * 100);
 
+    let stripePayment = null;
+
+try {
+  stripePayment = await stripe.paymentIntents.retrieve(
+    stripePaymentIntentId,
+    {
+      expand: [
+        "payment_method",
+        "charges.data"
+      ]
+    }
+  );
+
+  console.log("===== STRIPE PAYMENT RESPONSE =====");
+  console.log(JSON.stringify(stripePayment, null, 2));
+
+} catch (stripeErr) {
+  console.error("Stripe lookup failed:", stripeErr.message);
+}
+
     const baseUrl = process.env.RENDER_EXTERNAL_URL 
       || process.env.BASE_URL 
       || `http://localhost:${PORT}`;
