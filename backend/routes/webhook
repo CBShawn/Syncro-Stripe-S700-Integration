@@ -105,12 +105,9 @@ router.post(
           }
         }
 
-        // CASE B: Payment processing completed (process_payment_intent finished)
-        else if (actionType === "process_payment_intent") {
-          console.log(`✅ Payment processing completed on Reader ${readerId}`);
-          // Clean up the active intent cache
-          activeReaderIntents.delete(readerId);
-        }
+        // CASE B: else if (actionType === "process_payment_intent") {
+                  console.log(`ℹ️ Payment processing completed on Reader ${readerId}`);
+                  }
 
         // CASE C: Other action types (ignore or log)
         else {
