@@ -159,40 +159,36 @@ router.post("/pay-and-sign", async (req, res) => {
     // Store PaymentIntent ID mapped to reader for pre-dip card trigger
     activeReaderIntents.set(String(readerId), paymentIntent.id);
 
-    // 1. Set cart line items on S700 screen in Pre-Dip mode
-    await setTerminalReaderDisplay(
-    readerId,
-    lineItems,
-    totalChargeCents,
-    feeSaverCents
-    );
-
-    // Give the S700 time to render the cart
-    await new Promise(resolve => setTimeout(resolve, 5000));
-
-    // 2. Launch process_payment_intent
-    const processPayload = new URLSearchParams();
-
-    processPayload.append(
-  "payment_intent",
-  paymentIntent.id
+  await setTerminalReaderDisplay(
+  readerId,
+  lineItems,
+  totalChargeCents,
+  feeSaverCents
 );
 
-console.log(
-  "🚀 PROCESS PAYMENT PAYLOAD:",
-  processPayload.toString()
+// Give customer time to review cart
+await new Promise(resolve => setTimeout(resolve, 5000));
+
+// Update screen before switching to payment mode
+await setReaderMessage(
+  readerId,
+  "Please wait...Preparing payment"
 );
 
-    await axios.post(
-      `https://api.stripe.com/v1/terminal/readers/${readerId}/process_payment_intent`,
-      processPayload.toString(),
-      {
-        headers: {
-          Authorization: `Bearer ${process.env.STRIPE_SECRET_KEY}`,
-          "Content-Type": "application/x-www-form-urlencoded",
-        },
-      }
-    );
+// Start payment collection
+const processPayload = new URLSearchParams();
+processPayload.append("payment_intent", paymentIntent.id);
+
+await axios.post(
+  `https://api.stripe.com/v1/terminal/readers/${readerId}/process_payment_intent`,
+  processPayload.toString(),
+  {
+    headers: {
+      Authorization: `Bearer ${process.env.STRIPE_SECRET_KEY}`,
+      "Content-Type": "application/x-www-form-urlencoded",
+    },
+  }
+);
 
     console.log(`✅ Cart display and pre-dip payment intent (${paymentIntent.id}) active on Reader ${readerId}`);
 
