@@ -1,5 +1,33 @@
 const axios = require("axios");
 
+async function setReaderMessage(readerId, message) {
+  try {
+    const payload = new URLSearchParams();
+
+    payload.append("type", "message");
+    payload.append("message", message);
+
+    await axios.post(
+      `https://api.stripe.com/v1/terminal/readers/${readerId}/set_reader_display`,
+      payload.toString(),
+      {
+        headers: {
+          Authorization: `Bearer ${process.env.STRIPE_SECRET_KEY}`,
+          "Content-Type": "application/x-www-form-urlencoded",
+        },
+      }
+    );
+
+    console.log(`📱 Reader message updated: ${message}`);
+
+  } catch (err) {
+    console.error(
+      "⚠️ Failed setting reader message:",
+      err.response?.data || err.message
+    );
+  }
+}
+
 async function setTerminalReaderDisplay(readerId, lineItems, totalCents, feeSaverCents = 0) {
   try {
     const items = (Array.isArray(lineItems) && lineItems.length > 0)
