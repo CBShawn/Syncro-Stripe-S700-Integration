@@ -174,13 +174,6 @@ const payload = {
 
     ref_num: referenceString,
 
-    // Signature information
-    signature_name: cardholderName || "",
-    signature_data: signatureUrl || "",
-    signature_date: signatureFileId
-      ? new Date().toISOString()
-      : null,
-
     // Card information - last four only
     credit_card_number: cardLast4
       ? `****${cardLast4}`
@@ -194,27 +187,6 @@ const payload = {
       `Paid via Stripe Terminal (${stripePaymentIntentId || "N/A"}).` +
       `${sigNote}` +
       ` Stripe Invoice: ${stripeInvoiceId || "N/A"}`,
-
-    // Stripe transaction response
-    transaction_response: JSON.stringify({
-      success: true,
-      action: "payment",
-      message: "Stripe Terminal payment succeeded",
-      payment_intent_id: stripePaymentIntentId || null,
-      charge_id: stripePayment?.latest_charge || null,
-      card_type: cardBrand || null,
-      card_description: cardPresent.description || null,
-      card_last4: cardLast4 || null,
-      card_funding: cardPresent.funding || null,
-      card_issuer: cardPresent.issuer || null,
-      card_country: cardPresent.country || null,
-      cardholder_name: cardholderName || null,
-      currency: stripePayment?.currency || "usd",
-      amount: totalCents,
-      amount_received: stripePayment?.amount_received || totalCents,
-      signature_file_id: signatureFileId || null,
-      signature_url: signatureUrl || null,
-    }),
 
     // Existing Syncro invoice application logic
     invoice_payments_attributes: [
