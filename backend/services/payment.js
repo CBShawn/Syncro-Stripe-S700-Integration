@@ -137,7 +137,7 @@ async function recordSyncroPayment(
 
     // ---------------------------------------------------------------
     // Build Notes
-    // Keep under Syncro's 255-character field limit
+    // 
     // ---------------------------------------------------------------
 
     const notesstring = [
@@ -165,8 +165,7 @@ async function recordSyncroPayment(
       `Signature URL: ${signatureUrl || "N/A"}`,
       `Stripe Invoice: ${stripeInvoiceId || "N/A"}`,
     ]
-      .join(" | ")
-      .substring(0, 255);
+      .join(" | ");
 
     // ---------------------------------------------------------------
     // Build Transaction Response
@@ -175,24 +174,18 @@ async function recordSyncroPayment(
 
     const transactionresponse = [
       `Card: ${cardPresent.description || cardPresent.brand || "N/A"}`,
-      `Card Type: ${cardPresent.brand || "N/A"}`,
-      `Last 4: ****${cardPresent.last4 || "N/A"}`,
-      `Issuer: ${cardPresent.issuer || "N/A"}`,
-      `Country: ${cardPresent.country || "N/A"}`,
-      `Expiration: ${
+      `Type: ${cardPresent.brand || "N/A"}`,
+      `Last: ${cardPresent.last4 || "N/A"}`,
+      `Iss: ${cardPresent.issuer || "N/A"}`,
+      `Ctry: ${cardPresent.country || "N/A"}`,
+      `Exp: ${
         cardPresent.exp_month
           ? String(cardPresent.exp_month).padStart(2, "0")
           : "N/A"
       }/${cardPresent.exp_year || "N/A"}`,
-      `PaymentIntent: ${stripePaymentIntentId || "N/A"}`,
+      `PI: ${stripePaymentIntentId || "N/A"}`,
       `Charge: ${stripePayment?.latest_charge || "N/A"}`,
-      `Amount: ${stripePayment?.amount ?? totalCents}`,
-      `Amount Received: ${
-        stripePayment?.amount_received ?? totalCents
-      }`,
-      `Currency: ${stripePayment?.currency || "N/A"}`,
-      `Signature: ${signatureFileId || "N/A"}`,
-    ]
+       ]
       .join(" | ")
       .substring(0, 255);
 
