@@ -90,6 +90,32 @@ const sigNote = signatureFileId
 const referenceString =
   `${stripeInvoiceId || stripePaymentIntentId || "Terminal_Payment"}${sigTag}`;
 
+// ---------------------------------------------------------------
+// Get Syncro customer information BEFORE building the payload
+// ---------------------------------------------------------------
+
+    let customerData = {};
+
+try {
+  const customerResponse = await axios.get(
+    `https://${SYNCRO_SUBDOMAIN}.syncromsp.com/api/v1/customers/${parsedCustomerId}?api_key=${SYNCRO_API_KEY}`
+  );
+
+  customerData = customerResponse.data?.customer || {};
+
+} catch (customerErr) {
+  console.error(
+    "⚠️ Failed to fetch Syncro customer:",
+    customerErr.response?.data || customerErr.message
+  );
+}
+   
+console.log("===== SYNCRO PAYMENT RESPONSE =====");
+console.log(JSON.stringify(syncroResponse.data, null, 2));
+
+console.log("===== PAYMENT OBJECT KEYS =====");
+console.log(Object.keys(syncroResponse.data?.payment || {}));
+
     // ---------------------------------------------------------------
     // Build Stripe transaction response
   // ---------------------------------------------------------------
@@ -169,27 +195,7 @@ const syncroResponse = await axios.post(
   }
 );
 
-    let customerData = {};
-
-try {
-  const customerResponse = await axios.get(
-    `https://${SYNCRO_SUBDOMAIN}.syncromsp.com/api/v1/customers/${parsedCustomerId}?api_key=${SYNCRO_API_KEY}`
-  );
-
-  customerData = customerResponse.data?.customer || {};
-
-} catch (customerErr) {
-  console.error(
-    "⚠️ Failed to fetch Syncro customer:",
-    customerErr.response?.data || customerErr.message
-  );
-}
-   
-console.log("===== SYNCRO PAYMENT RESPONSE =====");
-console.log(JSON.stringify(syncroResponse.data, null, 2));
-
-console.log("===== PAYMENT OBJECT KEYS =====");
-console.log(Object.keys(syncroResponse.data?.payment || {}));
+    
 
     try {
   const verifyInvoice = await axios.get(
