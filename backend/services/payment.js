@@ -140,7 +140,7 @@ async function recordSyncroPayment(
     // 
     // ---------------------------------------------------------------
 
-    const notesstring = [
+    const messagestring = [
       `Stripe Terminal Payment`,
       `PaymentIntent: ${stripePaymentIntentId || "N/A"}`,
       `Charge: ${stripePayment?.latest_charge || "N/A"}`,
@@ -210,9 +210,9 @@ async function recordSyncroPayment(
 
         ref_num: referenceString,
 
-        notes: notesstring,
+        notes: messagestring,
 
-        message: "Test",
+        message: messagestring,
 
         ip_address: "Test",
 
