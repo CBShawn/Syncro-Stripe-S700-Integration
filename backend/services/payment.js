@@ -225,8 +225,8 @@ const payload = {
     ref_num: referenceString,
 
     // Signature information
-    signature_name: cardholderName || "",
-    signature_data: signatureUrl || "",
+    // signature_name: cardholderName || "",
+    // signature_data: signatureUrl || "",
     signature_date: signatureFileId
       ? new Date().toISOString()
       : null,
@@ -245,7 +245,7 @@ const payload = {
     firstname: firstName,
 
     // Stripe transaction information
-    transaction_response: JSON.stringify(transactionResponse),
+    // transaction_response: JSON.stringify(transactionResponse),
 
     // Keep the existing Syncro invoice application logic unchanged
     invoice_payments_attributes: [
