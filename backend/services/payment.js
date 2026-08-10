@@ -212,6 +212,12 @@ async function recordSyncroPayment(
 
         notes: notesstring,
 
+        message: "Test",
+
+        params: "Test",
+
+        address_state: "Test",
+
         transaction_response: transactionresponse,
 
         address_street: customerData.address || "",
