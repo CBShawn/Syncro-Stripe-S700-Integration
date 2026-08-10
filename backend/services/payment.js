@@ -81,6 +81,34 @@ try {
 
     const referenceString = `${stripeInvoiceId || stripePaymentIntentId || "Terminal_Payment"}${sigTag}`;
 
+    // ---------------------------------------------------------------
+// Build Stripe transaction response
+// ---------------------------------------------------------------
+
+const transactionResponse = [
+  `Stripe Terminal Payment`,
+  `PaymentIntent: ${stripePaymentIntentId || "N/A"}`,
+  `Charge: ${stripePayment?.latest_charge || "N/A"}`,
+  `Card: ${cardPresent.description || cardPresent.brand || "N/A"}`,
+  `Card Type: ${cardPresent.brand || "N/A"}`,
+  `Cardholder: ${cardPresent.cardholder_name || "N/A"}`,
+  `Last 4: ****${cardPresent.last4 || "N/A"}`,
+  `Funding: ${cardPresent.funding || "N/A"}`,
+  `Issuer: ${cardPresent.issuer || "N/A"}`,
+  `Country: ${cardPresent.country || "N/A"}`,
+  `Expiration: ${
+    cardPresent.exp_month
+      ? String(cardPresent.exp_month).padStart(2, "0")
+      : "N/A"
+  }/${cardPresent.exp_year || "N/A"}`,
+  `Currency: ${stripePayment?.currency || "N/A"}`,
+  `Amount: ${stripePayment?.amount ?? totalCents}`,
+  `Amount Received: ${stripePayment?.amount_received ?? totalCents}`,
+  `Signature File: ${signatureFileId || "N/A"}`,
+  `Signature URL: ${signatureUrl || "N/A"}`,
+  `Stripe Invoice: ${stripeInvoiceId || "N/A"}`,
+].join(" | ");
+
     const parsedCustomerId = parseInt(syncroCustomerId, 10);
     const parsedInvoiceId = parseInt(cleanInvoiceId, 10);
 
@@ -92,7 +120,7 @@ try {
         amount_cents: totalCents,
         payment_method: "Stripe Terminal (Signed in Stripe)",
         ref_num: referenceString,
-        transaction_response: `Paid via Stripe Terminal (${stripePaymentIntentId || "N/A"}).${sigNote} Stripe Invoice: ${stripeInvoiceId || "N/A"}`,
+        transaction_response: transactionResponse,
         invoice_payments_attributes: [
           {
             invoice_id: parsedInvoiceId,
