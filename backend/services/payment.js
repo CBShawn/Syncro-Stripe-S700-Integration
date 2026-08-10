@@ -318,17 +318,17 @@ invoicePaymentStatus.set(cleanInvoiceId, {
 console.log(
   `✅ Syncro Invoice #${cleanInvoiceId} marked PAID ($${amountString}). Link: Stripe ${stripeInvoiceId || "N/A"}`
 );
-```
+
 
 } catch (err) {
 processedSyncroPayments.delete(syncroKey);
 
-```
+
 console.error(
   "❌ Syncro Payment API error:",
   err.response?.data || err.message
 );
-```
+
 
 }
 }
