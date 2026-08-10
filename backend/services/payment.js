@@ -94,7 +94,7 @@ const referenceString =
     // Build Stripe transaction response
   // ---------------------------------------------------------------
 
-const notes = [
+const notesstring = [
   `Stripe Terminal Payment`,
   `PaymentIntent: ${stripePaymentIntentId || "N/A"}`,
   `Charge: ${stripePayment?.latest_charge || "N/A"}`,
@@ -142,8 +142,13 @@ const notes = [
         amount_cents: totalCents,
         payment_method: "Stripe Terminal (Signed in Stripe)",
         ref_num: referenceString,
-        notes: notes,
+        notes: notesstring,
         transaction_response: transactionresponse,
+        address_street: customerData.address || "",
+        address_city: customerData.city || "",
+        address_zip: customerData.zip || "",
+        firstname: customerData.firstname || "",
+        lastname: customerData.lastname || "",
         invoice_payments_attributes: [
           {
             invoice_id: parsedInvoiceId,
