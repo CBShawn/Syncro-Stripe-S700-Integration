@@ -4,8 +4,8 @@ const Stripe = require("stripe");
 const stripe = Stripe(process.env.STRIPE_SECRET_KEY);
 
 const {
-invoicePaymentStatus,
-processedSyncroPayments,
+  invoicePaymentStatus,
+  processedSyncroPayments,
 } = require("./cache");
 
 const PORT = process.env.PORT || 3000;
@@ -13,314 +13,377 @@ const SYNCRO_SUBDOMAIN = process.env.SYNCRO_SUBDOMAIN;
 const SYNCRO_API_KEY = process.env.SYNCRO_API_KEY;
 
 async function clearTerminalReaderDisplay(readerId) {
-if (!readerId) return;
+  if (!readerId) return;
 
-try {
-await stripe.terminal.readers.cancelAction(readerId);
+  try {
+    await stripe.terminal.readers.cancelAction(readerId);
 
-
-console.log(`🧹 Reader ${readerId} action cancelled/reset.`);
-
-
-} catch (err) {
-console.error(
-"⚠️ Failed to reset reader:",
-err.response?.data || err.message
-);
-}
+    console.log(`🧹 Reader ${readerId} action cancelled/reset.`);
+  } catch (err) {
+    console.error(
+      "⚠️ Failed to reset reader:",
+      err.response?.data || err.message
+    );
+  }
 }
 
 async function recordSyncroPayment(
-syncroInvoiceId,
-syncroCustomerId,
-amountString,
-stripePaymentIntentId,
-stripeInvoiceId,
-signatureFileId = null
+  syncroInvoiceId,
+  syncroCustomerId,
+  amountString,
+  stripePaymentIntentId,
+  stripeInvoiceId,
+  signatureFileId = null
 ) {
-const cleanInvoiceId = String(syncroInvoiceId || "").trim();
+  const cleanInvoiceId = String(syncroInvoiceId || "").trim();
 
-if (!cleanInvoiceId) {
-console.error("❌ recordSyncroPayment called with missing syncroInvoiceId");
-return;
-}
+  if (!cleanInvoiceId) {
+    console.error(
+      "❌ recordSyncroPayment called with missing syncroInvoiceId"
+    );
+    return;
+  }
 
-const syncroKey = `${cleanInvoiceId}_${amountString}`;
+  const syncroKey = `${cleanInvoiceId}_${amountString}`;
 
-if (processedSyncroPayments.has(syncroKey)) {
-console.log(
-`ℹ️ Syncro Invoice #${cleanInvoiceId} payment already processed. Skipping duplicate call.`
-);
-return;
-}
+  if (processedSyncroPayments.has(syncroKey)) {
+    console.log(
+      `ℹ️ Syncro Invoice #${cleanInvoiceId} payment already processed. Skipping duplicate call.`
+    );
+    return;
+  }
 
-processedSyncroPayments.add(syncroKey);
+  processedSyncroPayments.add(syncroKey);
 
-try {
-const amountFloat = parseFloat(amountString) || 0;
-const totalCents = Math.round(amountFloat * 100);
+  try {
+    const amountFloat = parseFloat(amountString) || 0;
+    const totalCents = Math.round(amountFloat * 100);
 
-let stripePayment = null;
+    // ---------------------------------------------------------------
+    // Retrieve the Stripe PaymentIntent and expanded payment method
+    // ---------------------------------------------------------------
 
-try {
-  stripePayment = await stripe.paymentIntents.retrieve(
-    stripePaymentIntentId,
-    {
-      expand: [
-        "payment_method",
-        "charges.data"
-      ]
+    let stripePayment = null;
+
+    try {
+      stripePayment = await stripe.paymentIntents.retrieve(
+        stripePaymentIntentId,
+        {
+          expand: [
+            "payment_method",
+            "charges.data",
+          ],
+        }
+      );
+
+      console.log("===== STRIPE PAYMENT RESPONSE =====");
+      console.log(JSON.stringify(stripePayment, null, 2));
+    } catch (stripeErr) {
+      console.error(
+        "Stripe lookup failed:",
+        stripeErr.message
+      );
     }
-  );
 
-  console.log("===== STRIPE PAYMENT RESPONSE =====");
-  console.log(JSON.stringify(stripePayment, null, 2));
+    // ---------------------------------------------------------------
+    // Extract Stripe card-present information
+    // ---------------------------------------------------------------
 
-} catch (stripeErr) {
-  console.error("Stripe lookup failed:", stripeErr.message);
-}
+    const cardPresent =
+      stripePayment?.payment_method?.card_present || {};
 
-// ---------------------------------------------------------------
-// Extract Stripe card-present information
-// ---------------------------------------------------------------
+    const cardBrand = cardPresent.brand || "";
+    const cardDescription = cardPresent.description || "";
+    const cardLast4 = cardPresent.last4 || "";
+    const cardFunding = cardPresent.funding || "";
+    const cardIssuer = cardPresent.issuer || "";
+    const cardCountry = cardPresent.country || "";
+    const cardholderName = cardPresent.cardholder_name || "";
 
-const cardPresent =
-  stripePayment?.payment_method?.card_present || {};
-
-const cardBrand = cardPresent.brand || "";
-const cardDescription = cardPresent.description || "";
-const cardLast4 = cardPresent.last4 || "";
-const cardFunding = cardPresent.funding || "";
-const cardIssuer = cardPresent.issuer || "";
-const cardCountry = cardPresent.country || "";
-
-const cardExpMonth = cardPresent.exp_month
-  ? String(cardPresent.exp_month).padStart(2, "0")
-  : "";
-
-const cardExpYear = cardPresent.exp_year
-  ? String(cardPresent.exp_year)
-  : "";
-
-// ---------------------------------------------------------------
-// Signature URL
-// ---------------------------------------------------------------
-
-const baseUrl =
-  process.env.RENDER_EXTERNAL_URL ||
-  process.env.BASE_URL ||
-  `http://localhost:${PORT}`;
-
-const sigTag = signatureFileId
-  ? ` | Sig: ${baseUrl}/api/signature/${signatureFileId}`
-  : "";
-
-const sigNote = signatureFileId
-  ? ` View signature: ${baseUrl}/api/signature/${signatureFileId}`
-  : "";
-
-const referenceString =
-  `${stripeInvoiceId || stripePaymentIntentId || "Terminal_Payment"}${sigTag}`;
-
-const parsedCustomerId = parseInt(syncroCustomerId, 10);
-const parsedInvoiceId = parseInt(cleanInvoiceId, 10);
-
-// ---------------------------------------------------------------
-// Fetch Syncro customer information BEFORE creating payment
-// so address fields can be populated.
-// ---------------------------------------------------------------
-
-let customerData = {};
-
-try {
-  const customerResponse = await axios.get(
-    `https://${SYNCRO_SUBDOMAIN}.syncromsp.com/api/v1/customers/${parsedCustomerId}?api_key=${SYNCRO_API_KEY}`
-  );
-
-  customerData = customerResponse.data?.customer || {};
-
-} catch (customerErr) {
-  console.error(
-    "⚠️ Failed to fetch Syncro customer:",
-    customerErr.response?.data || customerErr.message
-  );
-}
-
-// ---------------------------------------------------------------
-// Build useful Stripe transaction information for Syncro notes.
-//
-// We intentionally do NOT send:
-// - full card number
-// - CVV
-// - Stripe fingerprint
-//
-// Only non-sensitive card details such as brand/last4/issuer are
-// included.
-// ---------------------------------------------------------------
-
-const stripeCardInfo = [];
-
-if (cardBrand || cardDescription) {
-  const cardName = cardDescription
-    ? cardDescription
-    : cardBrand
-      ? cardBrand.toUpperCase()
+    const cardExpMonth = cardPresent.exp_month
+      ? String(cardPresent.exp_month).padStart(2, "0")
       : "";
 
-  if (cardName) {
-    stripeCardInfo.push(`Card: ${cardName}`);
-  }
-}
+    const cardExpYear = cardPresent.exp_year
+      ? String(cardPresent.exp_year)
+      : "";
 
-if (cardLast4) {
-  stripeCardInfo.push(`Last 4: ****${cardLast4}`);
-}
+    // ---------------------------------------------------------------
+    // Signature URL
+    // ---------------------------------------------------------------
 
-if (cardFunding) {
-  stripeCardInfo.push(
-    `Funding: ${cardFunding.charAt(0).toUpperCase()}${cardFunding.slice(1)}`
-  );
-}
+    const baseUrl =
+      process.env.RENDER_EXTERNAL_URL ||
+      process.env.BASE_URL ||
+      `http://localhost:${PORT}`;
 
-if (cardIssuer) {
-  stripeCardInfo.push(`Issuer: ${cardIssuer}`);
-}
+    const signatureUrl = signatureFileId
+      ? `${baseUrl}/api/signature/${signatureFileId}`
+      : "";
 
-if (cardCountry) {
-  stripeCardInfo.push(`Country: ${cardCountry}`);
-}
+    const sigTag = signatureUrl
+      ? ` | Sig: ${signatureUrl}`
+      : "";
 
-if (stripePayment?.latest_charge) {
-  stripeCardInfo.push(`Stripe Charge: ${stripePayment.latest_charge}`);
-}
+    const sigNote = signatureUrl
+      ? ` View signature: ${signatureUrl}`
+      : "";
 
-stripeCardInfo.push(
-  `Stripe PaymentIntent: ${stripePaymentIntentId || "N/A"}`
-);
+    // ---------------------------------------------------------------
+    // Use PaymentIntent as the primary Stripe reference.
+    // Stripe Invoice is optional because we no longer depend on
+    // creating a Stripe Invoice for every terminal payment.
+    // ---------------------------------------------------------------
 
-const stripeCardNote =
-  stripeCardInfo.length > 0
-    ? ` ${stripeCardInfo.join(" | ")}`
-    : "";
+    const referenceString =
+      `${stripePaymentIntentId || stripeInvoiceId || "Terminal_Payment"}${sigTag}`;
 
-// ---------------------------------------------------------------
-// Syncro payment payload
-// ---------------------------------------------------------------
+    const parsedCustomerId = parseInt(syncroCustomerId, 10);
+    const parsedInvoiceId = parseInt(cleanInvoiceId, 10);
 
-const payload = {
-  payment: {
-    customer_id: isNaN(parsedCustomerId)
-      ? 0
-      : parsedCustomerId,
+    // ---------------------------------------------------------------
+    // Fetch Syncro customer information so we can populate the
+    // documented address/name fields on the payment.
+    // ---------------------------------------------------------------
 
-    invoice_id: parsedInvoiceId,
+    let customerData = {};
 
-    amount: amountFloat,
+    try {
+      const customerResponse = await axios.get(
+        `https://${SYNCRO_SUBDOMAIN}.syncromsp.com/api/v1/customers/${parsedCustomerId}?api_key=${SYNCRO_API_KEY}`
+      );
 
-    amount_cents: totalCents,
+      customerData = customerResponse.data?.customer || {};
+    } catch (customerErr) {
+      console.error(
+        "⚠️ Failed to fetch Syncro customer:",
+        customerErr.response?.data || customerErr.message
+      );
+    }
 
-    // Syncro documented payment fields
-    address_street: customerData.address || "",
-    address_city: customerData.city || "",
-    address_zip: customerData.zip || "",
+    // ---------------------------------------------------------------
+    // Split Stripe cardholder name when available.
+    // ---------------------------------------------------------------
 
-    payment_method: "Stripe Terminal (Signed in Stripe)",
+    let firstName = "";
+    let lastName = "";
 
-    ref_num: referenceString,
+    if (cardholderName) {
+      const nameParts = cardholderName.trim().split(/\s+/);
 
-    // Stripe card expiration
-    date_month: cardExpMonth,
-    date_year: cardExpYear,
+      if (nameParts.length === 1) {
+        firstName = nameParts[0];
+      } else {
+        firstName = nameParts.shift();
+        lastName = nameParts.join(" ");
+      }
+    }
 
-    notes:
-      `Paid via Stripe Terminal (${stripePaymentIntentId || "N/A"}).` +
-      stripeCardNote +
-      `${sigNote}` +
-      ` Stripe Invoice: ${stripeInvoiceId || "N/A"}`,
+    // Fall back to the Syncro customer's name if Stripe did not
+    // provide a cardholder name.
+    if (!firstName) {
+      firstName = customerData.firstname || "";
+    }
 
-    // Keep the existing Syncro invoice application logic unchanged
-    invoice_payments_attributes: [
-      {
+    if (!lastName) {
+      lastName = customerData.lastname || "";
+    }
+
+    // ---------------------------------------------------------------
+    // Build a useful transaction response for Syncro.
+    //
+    // Deliberately excluded:
+    // - full card number
+    // - CVV
+    // - Stripe fingerprint
+    //
+    // Last 4 is safe and useful for identifying the card.
+    // ---------------------------------------------------------------
+
+    const transactionResponse = {
+      success: stripePayment?.status === "succeeded",
+      action: "payment",
+      message: "Stripe Terminal payment succeeded",
+      payment_intent_id: stripePaymentIntentId || "",
+      charge_id: stripePayment?.latest_charge || "",
+      card_type: cardBrand || "",
+      card_description: cardDescription || "",
+      card_last4: cardLast4 || "",
+      card_funding: cardFunding || "",
+      card_issuer: cardIssuer || "",
+      card_country: cardCountry || "",
+      cardholder_name: cardholderName || "",
+      currency: stripePayment?.currency || "usd",
+      amount: stripePayment?.amount || totalCents,
+      amount_received: stripePayment?.amount_received || totalCents,
+      signature_file_id: signatureFileId || "",
+      signature_url: signatureUrl || "",
+    };
+
+    // ---------------------------------------------------------------
+    // Build Syncro payment payload
+    // ---------------------------------------------------------------
+
+    const payload = {
+      payment: {
+        customer_id: isNaN(parsedCustomerId)
+          ? 0
+          : parsedCustomerId,
+
         invoice_id: parsedInvoiceId,
-        amount: amountFloat,
-        payment_amount: amountFloat,
+
+        amount_cents: totalCents,
+
+        address_street: customerData.address || "",
+
+        address_city: customerData.city || "",
+
+        address_zip: customerData.zip || "",
+
+        payment_method: cardBrand
+          ? `Stripe Terminal - ${cardBrand.toUpperCase()}`
+          : "Stripe Terminal (Signed in Stripe)",
+
+        ref_num: referenceString,
+
+        signature_name: cardholderName || "",
+
+        signature_data: signatureUrl || "",
+
+        signature_date: signatureFileId
+          ? new Date().toISOString()
+          : null,
+
+        // IMPORTANT:
+        // Only send the last 4 digits here. Never send full card
+        // number or CVV.
+        credit_card_number: cardLast4
+          ? `****${cardLast4}`
+          : "",
+
+        date_month: cardExpMonth,
+
+        date_year: cardExpYear,
+
+        cvv: "",
+
+        lastname: lastName,
+
+        firstname: firstName,
+
+        transaction_response: JSON.stringify(
+          transactionResponse
+        ),
+
+        notes:
+          `Paid via Stripe Terminal (${stripePaymentIntentId || "N/A"}).` +
+          `${cardDescription ? ` Card: ${cardDescription}.` : ""}` +
+          `${cardLast4 ? ` Last 4: ****${cardLast4}.` : ""}` +
+          `${cardFunding ? ` Funding: ${cardFunding}.` : ""}` +
+          `${cardIssuer ? ` Issuer: ${cardIssuer}.` : ""}` +
+          `${cardCountry ? ` Country: ${cardCountry}.` : ""}` +
+          `${sigNote}` +
+          ` Stripe Invoice: ${stripeInvoiceId || "N/A"}`,
+
+        // Keep the existing Syncro invoice application logic.
+        invoice_payments_attributes: [
+          {
+            invoice_id: parsedInvoiceId,
+            amount: amountFloat,
+            payment_amount: amountFloat,
+          },
+        ],
       },
-    ],
-  },
-};
+    };
 
-const syncroResponse = await axios.post(
-  `https://${SYNCRO_SUBDOMAIN}.syncromsp.com/api/v1/payments?api_key=${SYNCRO_API_KEY}`,
-  payload,
-  {
-    headers: {
-      "Content-Type": "application/json",
-    },
-  }
-);
+    console.log("===== SYNCRO PAYMENT PAYLOAD =====");
+    console.log(
+      JSON.stringify(payload, null, 2)
+    );
 
-console.log("===== SYNCRO PAYMENT RESPONSE =====");
-console.log(JSON.stringify(syncroResponse.data, null, 2));
+    // ---------------------------------------------------------------
+    // Create Syncro payment
+    // ---------------------------------------------------------------
 
-console.log("===== PAYMENT OBJECT KEYS =====");
-console.log(
-  Object.keys(syncroResponse.data?.payment || {})
-);
-
-try {
-  const verifyInvoice = await axios.get(
-    `https://${SYNCRO_SUBDOMAIN}.syncromsp.com/api/v1/invoices/${cleanInvoiceId}?api_key=${SYNCRO_API_KEY}`
-  );
-
-  console.log("===== SYNCRO INVOICE AFTER PAYMENT =====");
-  console.log(
-    JSON.stringify(
+    const syncroResponse = await axios.post(
+      `https://${SYNCRO_SUBDOMAIN}.syncromsp.com/api/v1/payments?api_key=${SYNCRO_API_KEY}`,
+      payload,
       {
-        id: verifyInvoice.data.invoice?.id,
-        status: verifyInvoice.data.invoice?.status,
-        balance_due: verifyInvoice.data.invoice?.balance_due,
-        paid: verifyInvoice.data.invoice?.paid,
-        payment_status: verifyInvoice.data.invoice?.payment_status
-      },
-      null,
-      2
-    )
-  );
+        headers: {
+          "Content-Type": "application/json",
+        },
+      }
+    );
 
-} catch (verifyErr) {
-  console.error(
-    "❌ Syncro invoice verification failed:",
-    verifyErr.response?.data || verifyErr.message
-  );
-}
+    console.log("===== SYNCRO PAYMENT RESPONSE =====");
+    console.log(
+      JSON.stringify(syncroResponse.data, null, 2)
+    );
 
-// Update status cache cleanly & explicitly clear the stage flag
-invoicePaymentStatus.set(cleanInvoiceId, {
-  status: "paid",
-  stage: null,
-  amount: amountString,
-  stripe_invoice_id: stripeInvoiceId || "",
-});
+    console.log("===== PAYMENT OBJECT KEYS =====");
+    console.log(
+      Object.keys(syncroResponse.data?.payment || {})
+    );
 
-console.log(
-  `✅ Syncro Invoice #${cleanInvoiceId} marked PAID ($${amountString}). Link: Stripe ${stripeInvoiceId || "N/A"}`
-);
+    // ---------------------------------------------------------------
+    // Verify Syncro invoice after payment
+    // ---------------------------------------------------------------
 
+    try {
+      const verifyInvoice = await axios.get(
+        `https://${SYNCRO_SUBDOMAIN}.syncromsp.com/api/v1/invoices/${cleanInvoiceId}?api_key=${SYNCRO_API_KEY}`
+      );
 
-} catch (err) {
-processedSyncroPayments.delete(syncroKey);
+      console.log("===== SYNCRO INVOICE AFTER PAYMENT =====");
 
+      console.log(
+        JSON.stringify(
+          {
+            id: verifyInvoice.data.invoice?.id,
+            status: verifyInvoice.data.invoice?.status,
+            balance_due:
+              verifyInvoice.data.invoice?.balance_due,
+            paid:
+              verifyInvoice.data.invoice?.paid,
+            payment_status:
+              verifyInvoice.data.invoice?.payment_status,
+          },
+          null,
+          2
+        )
+      );
+    } catch (verifyErr) {
+      console.error(
+        "❌ Syncro invoice verification failed:",
+        verifyErr.response?.data || verifyErr.message
+      );
+    }
 
-console.error(
-  "❌ Syncro Payment API error:",
-  err.response?.data || err.message
-);
+    // ---------------------------------------------------------------
+    // Update status cache cleanly and clear the signature stage lock
+    // ---------------------------------------------------------------
 
+    invoicePaymentStatus.set(cleanInvoiceId, {
+      status: "paid",
+      stage: null,
+      amount: amountString,
+      stripe_invoice_id: stripeInvoiceId || "",
+    });
 
-}
+    console.log(
+      `✅ Syncro Invoice #${cleanInvoiceId} marked PAID ($${amountString}). Link: Stripe ${stripePaymentIntentId || "N/A"}`
+    );
+  } catch (err) {
+    processedSyncroPayments.delete(syncroKey);
+
+    console.error(
+      "❌ Syncro Payment API error:",
+      err.response?.data || err.message
+    );
+  }
 }
 
 module.exports = {
-recordSyncroPayment,
-clearTerminalReaderDisplay,
+  recordSyncroPayment,
+  clearTerminalReaderDisplay,
 };
