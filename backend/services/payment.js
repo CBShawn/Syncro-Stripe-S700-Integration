@@ -274,17 +274,7 @@ async function recordSyncroPayment(
         transaction_response: JSON.stringify(
           transactionResponse
         ),
-
-        notes:
-          `Paid via Stripe Terminal (${stripePaymentIntentId || "N/A"}).` +
-          `${cardDescription ? ` Card: ${cardDescription}.` : ""}` +
-          `${cardLast4 ? ` Last 4: ****${cardLast4}.` : ""}` +
-          `${cardFunding ? ` Funding: ${cardFunding}.` : ""}` +
-          `${cardIssuer ? ` Issuer: ${cardIssuer}.` : ""}` +
-          `${cardCountry ? ` Country: ${cardCountry}.` : ""}` +
-          `${sigNote}` +
-          ` Stripe Invoice: ${stripeInvoiceId || "N/A"}`,
-
+       
         // Keep the existing Syncro invoice application logic.
         invoice_payments_attributes: [
           {
