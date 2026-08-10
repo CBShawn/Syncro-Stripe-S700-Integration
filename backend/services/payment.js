@@ -92,7 +92,7 @@ try {
         amount_cents: totalCents,
         payment_method: "Stripe Terminal (Signed in Stripe)",
         ref_num: referenceString,
-        tranaction_response: `Paid via Stripe Terminal (${stripePaymentIntentId || "N/A"}).${sigNote} Stripe Invoice: ${stripeInvoiceId || "N/A"}`,
+        transaction_response: `Paid via Stripe Terminal (${stripePaymentIntentId || "N/A"}).${sigNote} Stripe Invoice: ${stripeInvoiceId || "N/A"}`,
         invoice_payments_attributes: [
           {
             invoice_id: parsedInvoiceId,
