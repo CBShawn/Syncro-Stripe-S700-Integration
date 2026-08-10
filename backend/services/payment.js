@@ -167,17 +167,7 @@ const payload = {
     lastname: customerData.lastname || "",
     firstname: customerData.firstname || "",
 
-    // Stripe payment information
-    payment_method: cardBrand
-      ? `Stripe Terminal - ${cardBrand.toUpperCase()}`
-      : "Stripe Terminal (Signed in Stripe)",
-
     ref_num: referenceString,
-
-    // Card information - last four only
-    credit_card_number: cardLast4
-      ? `****${cardLast4}`
-      : "",
 
     date_month: cardExpMonth,
     date_year: cardExpYear,
