@@ -214,7 +214,13 @@ async function recordSyncroPayment(
 
         message: "Test",
 
-        params: "Test",
+        ip_address: "Test",
+
+        action: "Test",
+
+        card_type: "Test",
+
+        Card_exp: "Test",
 
         address_state: "Test",
 
