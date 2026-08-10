@@ -18,9 +18,9 @@ if (!readerId) return;
 try {
 await stripe.terminal.readers.cancelAction(readerId);
 
-```
+
 console.log(`🧹 Reader ${readerId} action cancelled/reset.`);
-```
+
 
 } catch (err) {
 console.error(
@@ -60,7 +60,6 @@ try {
 const amountFloat = parseFloat(amountString) || 0;
 const totalCents = Math.round(amountFloat * 100);
 
-```
 let stripePayment = null;
 
 try {
@@ -306,17 +305,17 @@ invoicePaymentStatus.set(cleanInvoiceId, {
 console.log(
   `✅ Syncro Invoice #${cleanInvoiceId} marked PAID ($${amountString}). Link: Stripe ${stripeInvoiceId || "N/A"}`
 );
-```
+
 
 } catch (err) {
 processedSyncroPayments.delete(syncroKey);
 
-```
+
 console.error(
   "❌ Syncro Payment API error:",
   err.response?.data || err.message
 );
-```
+
 
 }
 }
