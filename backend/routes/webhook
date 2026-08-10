@@ -49,6 +49,17 @@ router.post(
         const readerObj = event.data.object;
         const readerId = String(readerObj.id);
         const action = readerObj.action || {};
+
+console.log(
+  "===== COLLECT INPUTS ACTION DEBUG =====",
+  JSON.stringify(action, null, 2)
+);
+
+console.log(
+  "===== READER METADATA DEBUG =====",
+  JSON.stringify(readerObj.metadata || {}, null, 2)
+);
+
         const actionType = action.type;
 
         console.log(`📋 Reader action type: ${actionType}`);
