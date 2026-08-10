@@ -116,7 +116,7 @@ const transactionResponse = [
   `Signature File: ${signatureFileId || "N/A"}`,
   `Signature URL: ${signatureUrl || "N/A"}`,
   `Stripe Invoice: ${stripeInvoiceId || "N/A"}`,
-].join(" | ");
+].join(" | ").substring(0, 255);
 
     const parsedCustomerId = parseInt(syncroCustomerId, 10);
     const parsedInvoiceId = parseInt(cleanInvoiceId, 10);
