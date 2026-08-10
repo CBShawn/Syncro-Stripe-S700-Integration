@@ -144,69 +144,63 @@ else if (actionType === "process_payment_intent") {
 
 let stripeInvoiceId = null;
 
-try {
-  const invoice = await stripe.invoices.create({
-    customer: pi.customer,
-    collection_method: "charge_automatically",
-    auto_advance: false,
-    description: `Syncro Invoice #${syncroInvoiceId}`,
-    custom_fields: [{ name: "Syncro Invoice", value: `#${syncroInvoiceId}` }],
-    footer: `Paid via Stripe Terminal Reader (${readerId}). Digital signature recorded upon completion.`,
-    metadata: {
-      syncro_invoice_id: String(syncroInvoiceId),
-      terminal_payment_intent_id: pi.id,
-    },
-  });
+        try {
+          const invoice = await stripe.invoices.create({
+            customer: pi.customer,
+            collection_method: "charge_automatically",
+            auto_advance: false,
+            description: `Syncro Invoice #${syncroInvoiceId}`,
+            custom_fields: [{ name: "Syncro Invoice", value: `#${syncroInvoiceId}` }],
+            footer: `Paid via Stripe Terminal Reader (${readerId}). Digital signature recorded upon completion.`,
+            metadata: {
+              syncro_invoice_id: String(syncroInvoiceId),
+              terminal_payment_intent_id: pi.id,
+            },
+          });
 
-  let itemsToAttach = [];
-  const targetAmount = pi.amount - feeSaverCents;
+          let itemsToAttach = [];
+          const targetAmount = pi.amount - feeSaverCents;
 
-  const lineItemsSum = (Array.isArray(lineItems) && lineItems.length > 0)
-    ? lineItems.reduce((sum, item) => sum + (parseInt(item.amount, 10) || 0), 0)
-    : 0;
+          const lineItemsSum = (Array.isArray(lineItems) && lineItems.length > 0)
+            ? lineItems.reduce((sum, item) => sum + (parseInt(item.amount, 10) || 0), 0)
+            : 0;
 
-  if (lineItemsSum === targetAmount && lineItemsSum > 0) {
-    itemsToAttach = [...lineItems];
-  } else {
-    itemsToAttach = [{
-      description: `Syncro Invoice #${syncroInvoiceId} Service Charge`,
-      amount: targetAmount,
-    }];
-  }
+          if (lineItemsSum === targetAmount && lineItemsSum > 0) {
+            itemsToAttach = [...lineItems];
+          } else {
+            itemsToAttach = [{
+              description: `Syncro Invoice #${syncroInvoiceId} Service Charge`,
+              amount: targetAmount,
+            }];
+          }
 
-  if (feeSaverCents > 0) {
-    itemsToAttach.push({
-      description: "Processing Fee / Fee Saver",
-      amount: feeSaverCents,
-    });
-  }
+          if (feeSaverCents > 0) {
+            itemsToAttach.push({
+              description: "Processing Fee / Fee Saver",
+              amount: feeSaverCents,
+            });
+          }
 
-  for (const item of itemsToAttach) {
-    await stripe.invoiceItems.create({
-      customer: pi.customer,
-      invoice: invoice.id,
-      amount: parseInt(item.amount, 10),
-      currency: "usd",
-      description: item.description,
-    });
-  }
+          for (const item of itemsToAttach) {
+            await stripe.invoiceItems.create({
+              customer: pi.customer,
+              invoice: invoice.id,
+              amount: parseInt(item.amount, 10),
+              currency: "usd",
+              description: item.description,
+            });
+          }
 
-  // Finalize the invoice first
-  const finalizedInvoice = await stripe.invoices.finalizeInvoice(invoice.id);
+          const paidInvoice = await stripe.invoices.pay(invoice.id, {
+            paid_out_of_band: true,
+          });
 
-  // Pay the invoice using the Terminal PaymentIntent (NOT out of band)
-  const paidInvoice = await stripe.invoices.pay(invoice.id, {
-    paid_out_of_band: false,
-    payment_intent: pi.id  // Link the Terminal payment to this invoice
-  });
+          stripeInvoiceId = paidInvoice.id;
+          console.log(`✅ Finalized & Paid Invoice ${stripeInvoiceId} out-of-band.`);
 
-  stripeInvoiceId = paidInvoice.id;
-  console.log(`✅ Finalized & Paid Invoice ${stripeInvoiceId} using Terminal PaymentIntent ${pi.id}.`);
-
-} catch (invErr) {
-  console.error("❌ Failed creating/paying Stripe invoice:", invErr.message);
-}
-
+        } catch (invErr) {
+          console.error("❌ Failed creating/paying Stripe invoice:", invErr.message);
+        }
         if (syncroInvoiceId && syncroCustomerId && stripeInvoiceId) {
           pendingSyncroPayments.set(String(stripeInvoiceId), {
             syncroInvoiceId,
