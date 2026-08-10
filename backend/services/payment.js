@@ -67,23 +67,32 @@ try {
   console.error("Stripe lookup failed:", stripeErr.message);
 }
 
-    const baseUrl = process.env.RENDER_EXTERNAL_URL 
-      || process.env.BASE_URL 
-      || `http://localhost:${PORT}`;
+  const baseUrl =
+  process.env.RENDER_EXTERNAL_URL ||
+  process.env.BASE_URL ||
+  `http://localhost:${PORT}`;
 
-    const sigTag = signatureFileId 
-      ? ` | Sig: ${baseUrl}/api/signature/${signatureFileId}` 
-      : "";
+const cardPresent =
+  stripePayment?.payment_method?.card_present || {};
 
-    const sigNote = signatureFileId 
-      ? ` View signature: ${baseUrl}/api/signature/${signatureFileId}` 
-      : "";
+const signatureUrl = signatureFileId
+  ? `${baseUrl}/api/signature/${signatureFileId}`
+  : "";
 
-    const referenceString = `${stripeInvoiceId || stripePaymentIntentId || "Terminal_Payment"}${sigTag}`;
+const sigTag = signatureFileId
+  ? ` | Sig: ${signatureUrl}`
+  : "";
+
+const sigNote = signatureFileId
+  ? ` View signature: ${signatureUrl}`
+  : "";
+
+const referenceString =
+  `${stripeInvoiceId || stripePaymentIntentId || "Terminal_Payment"}${sigTag}`;
 
     // ---------------------------------------------------------------
-// Build Stripe transaction response
-// ---------------------------------------------------------------
+    // Build Stripe transaction response
+  // ---------------------------------------------------------------
 
 const transactionResponse = [
   `Stripe Terminal Payment`,
