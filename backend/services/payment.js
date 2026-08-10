@@ -221,7 +221,7 @@ async function recordSyncroPayment(
 
         card_exp: "Test",
 
-        address_state: customerData.state || "",,
+        address_state: customerData.state || "",
 
         transaction_response: transactionresponse,
 
