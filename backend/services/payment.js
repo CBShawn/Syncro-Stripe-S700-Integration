@@ -94,7 +94,7 @@ const referenceString =
     // Build Stripe transaction response
   // ---------------------------------------------------------------
 
-const transactionResponse = [
+const notes = [
   `Stripe Terminal Payment`,
   `PaymentIntent: ${stripePaymentIntentId || "N/A"}`,
   `Charge: ${stripePayment?.latest_charge || "N/A"}`,
@@ -116,7 +116,20 @@ const transactionResponse = [
   `Signature File: ${signatureFileId || "N/A"}`,
   `Signature URL: ${signatureUrl || "N/A"}`,
   `Stripe Invoice: ${stripeInvoiceId || "N/A"}`,
-].join(" | ").substring(0, 255);
+].join(" | ");
+
+  const transactionresponse = [
+  `Card: ${cardPresent.description || cardPresent.brand || "N/A"}`,
+  `Card Type: ${cardPresent.brand || "N/A"}`,
+  `Last 4: ****${cardPresent.last4 || "N/A"}`,
+  `Issuer: ${cardPresent.issuer || "N/A"}`,
+  `Country: ${cardPresent.country || "N/A"}`,
+  `Expiration: ${
+    cardPresent.exp_month
+      ? String(cardPresent.exp_month).padStart(2, "0")
+      : "N/A"
+  }/${cardPresent.exp_year || "N/A"}`,
+  ].join(" | ").substring(0, 255);
 
     const parsedCustomerId = parseInt(syncroCustomerId, 10);
     const parsedInvoiceId = parseInt(cleanInvoiceId, 10);
@@ -129,7 +142,8 @@ const transactionResponse = [
         amount_cents: totalCents,
         payment_method: "Stripe Terminal (Signed in Stripe)",
         ref_num: referenceString,
-        transaction_response: transactionResponse,
+        notes: notes,
+        transaction_response: transactionresponse,
         invoice_payments_attributes: [
           {
             invoice_id: parsedInvoiceId,
