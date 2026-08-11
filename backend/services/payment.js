@@ -139,7 +139,7 @@ async function recordSyncroPayment(
 // ---------------------------------------------------------------
 // Download Stripe Terminal signature as SVG
 // ---------------------------------------------------------------
-const sharp = require("sharp");
+
 
 // ---------------------------------------------------------------
 // Get Stripe signature and convert SVG → PNG data URL
@@ -325,6 +325,14 @@ signature_date: signatureFileId
       }
     );
 
+console.log("===== SIGNATURE CHECK =====");
+console.log({
+  sentSignature: !!syncroSignatureData,
+  sentLength: syncroSignatureData?.length,
+  returnedSignatureData: !!syncroResponse.data?.payment?.signature_data,
+  returnedBase64Png: !!syncroResponse.data?.payment?.base64_png,
+});
+    
     // ---------------------------------------------------------------
     // Syncro Response
     // ---------------------------------------------------------------
