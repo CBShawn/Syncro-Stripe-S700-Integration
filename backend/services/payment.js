@@ -2,7 +2,6 @@ const axios = require("axios");
 
 const Stripe = require("stripe");
 const stripe = Stripe(process.env.STRIPE_SECRET_KEY);
-const sharp = require("sharp");
 
 const {
   invoicePaymentStatus,
@@ -12,6 +11,11 @@ const {
 const PORT = process.env.PORT || 3000;
 const SYNCRO_SUBDOMAIN = process.env.SYNCRO_SUBDOMAIN;
 const SYNCRO_API_KEY = process.env.SYNCRO_API_KEY;
+
+
+// ================================================================
+// ATTACH STRIPE SIGNATURE TO SYNCRO TICKET
+// ================================================================
 
 async function attachSignatureToSyncroTicket(
   syncroInvoiceId,
@@ -25,9 +29,9 @@ async function attachSignatureToSyncroTicket(
   }
 
   try {
-    // -------------------------------------------------------------
-    // Find the ticket associated with the Syncro invoice
-    // -------------------------------------------------------------
+    // ------------------------------------------------------------
+    // Find ticket associated with invoice
+    // ------------------------------------------------------------
 
     const ticketResponse = await axios.get(
       `https://${SYNCRO_SUBDOMAIN}.syncromsp.com/api/v1/invoices/${syncroInvoiceId}/ticket?api_key=${SYNCRO_API_KEY}`
@@ -39,21 +43,24 @@ async function attachSignatureToSyncroTicket(
 
     const ticketId = ticket?.id;
 
+    console.log("===== SYNCRO INVOICE TICKET LOOKUP =====");
+    console.log(JSON.stringify(ticketResponse.data, null, 2));
+
     if (!ticketId) {
       console.warn(
-        `⚠️ Syncro Invoice #${syncroInvoiceId} has no linked ticket.`
+        `⚠️ Invoice #${syncroInvoiceId} has no associated ticket.`
       );
 
       return null;
     }
 
     console.log(
-      `📎 Invoice #${syncroInvoiceId} is linked to Ticket #${ticketId}`
+      `📎 Invoice #${syncroInvoiceId} → Ticket #${ticketId}`
     );
 
-    // -------------------------------------------------------------
-    // URL that Syncro will fetch
-    // -------------------------------------------------------------
+    // ------------------------------------------------------------
+    // Public URL to Stripe signature
+    // ------------------------------------------------------------
 
     const baseUrl =
       process.env.RENDER_EXTERNAL_URL ||
@@ -64,23 +71,17 @@ async function attachSignatureToSyncroTicket(
       `${baseUrl}/api/signature/${encodeURIComponent(signatureFileId)}`;
 
     console.log(
-      `📎 Attaching Stripe signature to Syncro Ticket #${ticketId}`
-    );
-
-    console.log(
       `📎 Signature URL: ${signatureUrl}`
     );
 
-    // -------------------------------------------------------------
-    // Attach URL to Syncro ticket
-    // -------------------------------------------------------------
+    // ------------------------------------------------------------
+    // Attach file to Syncro ticket
+    // ------------------------------------------------------------
 
     const attachResponse = await axios.post(
       `https://${SYNCRO_SUBDOMAIN}.syncromsp.com/api/v1/tickets/${ticketId}/attach_file_url?api_key=${SYNCRO_API_KEY}`,
       {
         url: signatureUrl,
-        file_url: signatureUrl,
-        filename: `invoice-${syncroInvoiceId}-signature.svg`,
       },
       {
         headers: {
@@ -90,11 +91,15 @@ async function attachSignatureToSyncroTicket(
     );
 
     console.log(
-      "✅ Signature successfully attached to Syncro ticket"
+      "===== SYNCRO ATTACHMENT RESPONSE ====="
     );
 
     console.log(
       JSON.stringify(attachResponse.data, null, 2)
+    );
+
+    console.log(
+      `✅ Signature attached to Syncro Ticket #${ticketId}`
     );
 
     return {
@@ -105,7 +110,10 @@ async function attachSignatureToSyncroTicket(
 
   } catch (err) {
     console.error(
-      "❌ Failed to attach signature to Syncro ticket:",
+      "❌ Failed to attach signature to Syncro ticket:"
+    );
+
+    console.error(
       err.response?.data || err.message
     );
 
@@ -114,6 +122,9 @@ async function attachSignatureToSyncroTicket(
 }
 
 
+// ================================================================
+// CLEAR TERMINAL READER
+// ================================================================
 
 async function clearTerminalReaderDisplay(readerId) {
   if (!readerId) return;
@@ -121,7 +132,10 @@ async function clearTerminalReaderDisplay(readerId) {
   try {
     await stripe.terminal.readers.cancelAction(readerId);
 
-    console.log(`🧹 Reader ${readerId} action cancelled/reset.`);
+    console.log(
+      `🧹 Reader ${readerId} action cancelled/reset.`
+    );
+
   } catch (err) {
     console.error(
       "⚠️ Failed to reset reader:",
@@ -129,6 +143,11 @@ async function clearTerminalReaderDisplay(readerId) {
     );
   }
 }
+
+
+// ================================================================
+// RECORD SYNCRO PAYMENT
+// ================================================================
 
 async function recordSyncroPayment(
   syncroInvoiceId,
@@ -138,66 +157,93 @@ async function recordSyncroPayment(
   stripeInvoiceId,
   signatureFileId = null
 ) {
-  const cleanInvoiceId = String(syncroInvoiceId || "").trim();
+  const cleanInvoiceId =
+    String(syncroInvoiceId || "").trim();
 
   if (!cleanInvoiceId) {
     console.error(
       "❌ recordSyncroPayment called with missing syncroInvoiceId"
     );
+
     return;
   }
 
-  const syncroKey = `${cleanInvoiceId}_${amountString}`;
+  const syncroKey =
+    `${cleanInvoiceId}_${amountString}`;
 
   if (processedSyncroPayments.has(syncroKey)) {
     console.log(
-      `ℹ️ Syncro Invoice #${cleanInvoiceId} payment already processed. Skipping duplicate call.`
+      `ℹ️ Syncro Invoice #${cleanInvoiceId} payment already processed.`
     );
+
     return;
   }
 
   processedSyncroPayments.add(syncroKey);
 
   try {
-    const amountFloat = parseFloat(amountString) || 0;
-    const totalCents = Math.round(amountFloat * 100);
+    const amountFloat =
+      parseFloat(amountString) || 0;
 
-    const parsedCustomerId = parseInt(syncroCustomerId, 10);
-    const parsedInvoiceId = parseInt(cleanInvoiceId, 10);
+    const totalCents =
+      Math.round(amountFloat * 100);
 
-    // ---------------------------------------------------------------
-    // Get Stripe PaymentIntent
-    // ---------------------------------------------------------------
+    const parsedCustomerId =
+      parseInt(syncroCustomerId, 10);
+
+    const parsedInvoiceId =
+      parseInt(cleanInvoiceId, 10);
+
+
+    // ============================================================
+    // GET STRIPE PAYMENT
+    // ============================================================
 
     let stripePayment = null;
 
     try {
-      stripePayment = await stripe.paymentIntents.retrieve(
-        stripePaymentIntentId,
-        {
-          expand: [
-            "payment_method",
-            "charges.data",
-          ],
-        }
+      stripePayment =
+        await stripe.paymentIntents.retrieve(
+          stripePaymentIntentId,
+          {
+            expand: [
+              "payment_method",
+              "charges.data",
+            ],
+          }
+        );
+
+      console.log(
+        "===== STRIPE PAYMENT RESPONSE ====="
       );
 
-      console.log("===== STRIPE PAYMENT RESPONSE =====");
-      console.log(JSON.stringify(stripePayment, null, 2));
+      console.log(
+        JSON.stringify(
+          stripePayment,
+          null,
+          2
+        )
+      );
+
     } catch (stripeErr) {
-      console.error("Stripe lookup failed:", stripeErr.message);
+      console.error(
+        "Stripe lookup failed:",
+        stripeErr.message
+      );
     }
 
-    // ---------------------------------------------------------------
-    // Stripe card-present information
-    // ---------------------------------------------------------------
+
+    // ============================================================
+    // CARD PRESENT
+    // ============================================================
 
     const cardPresent =
       stripePayment?.payment_method?.card_present || {};
 
-    // ---------------------------------------------------------------
-    // Signature URL
-    // ---------------------------------------------------------------
+
+    // ============================================================
+    // SIGNATURE URL
+    // ============================================================
 
     const baseUrl =
       process.env.RENDER_EXTERNAL_URL ||
@@ -205,99 +251,44 @@ async function recordSyncroPayment(
       `http://localhost:${PORT}`;
 
     const signatureUrl = signatureFileId
-      ? `${baseUrl}/api/signature/${signatureFileId}`
+      ? `${baseUrl}/api/signature/${encodeURIComponent(signatureFileId)}`
       : "";
 
     const sigTag = signatureFileId
       ? ` | Sig: ${signatureUrl}`
       : "";
 
-    const sigNote = signatureFileId
-      ? ` View signature: ${signatureUrl}`
-      : "";
-
     const referenceString =
       `${stripeInvoiceId || stripePaymentIntentId || "Terminal_Payment"}${sigTag}`;
 
-    // ---------------------------------------------------------------
-    // Get Syncro customer information
-    // ---------------------------------------------------------------
+
+    // ============================================================
+    // GET SYNCRO CUSTOMER
+    // ============================================================
 
     let customerData = {};
 
     try {
-      const customerResponse = await axios.get(
-        `https://${SYNCRO_SUBDOMAIN}.syncromsp.com/api/v1/customers/${parsedCustomerId}?api_key=${SYNCRO_API_KEY}`
-      );
+      const customerResponse =
+        await axios.get(
+          `https://${SYNCRO_SUBDOMAIN}.syncromsp.com/api/v1/customers/${parsedCustomerId}?api_key=${SYNCRO_API_KEY}`
+        );
 
-      customerData = customerResponse.data?.customer || {};
+      customerData =
+        customerResponse.data?.customer || {};
+
     } catch (customerErr) {
       console.error(
         "⚠️ Failed to fetch Syncro customer:",
-        customerErr.response?.data || customerErr.message
+        customerErr.response?.data ||
+        customerErr.message
       );
     }
 
-// ---------------------------------------------------------------
-// Download Stripe Terminal signature as SVG
-// ---------------------------------------------------------------
 
-
-// ---------------------------------------------------------------
-// Get Stripe signature and convert SVG → PNG data URL
-// ---------------------------------------------------------------
-
-let syncroSignatureData = "";
-
-if (signatureFileId) {
-  try {
-    const stripeFile = await stripe.files.retrieve(signatureFileId);
-
-    console.log("===== STRIPE SIGNATURE FILE =====");
-    console.log({
-      id: stripeFile.id,
-      filename: stripeFile.filename,
-      type: stripeFile.type,
-      size: stripeFile.size,
-    });
-
-    const signatureResponse = await axios.get(stripeFile.url, {
-      auth: {
-        username: process.env.STRIPE_SECRET_KEY,
-        password: "",
-      },
-      responseType: "arraybuffer",
-    });
-
-    // Convert Stripe SVG → PNG
-    const pngBuffer = await sharp(
-      Buffer.from(signatureResponse.data)
-    )
-      .png()
-      .toBuffer();
-
-    // This is the value that goes to Syncro
-    syncroSignatureData =
-      `data:image/png;base64,${pngBuffer.toString("base64")}`;
-
-    console.log(
-      "✅ syncroSignatureData created:",
-      syncroSignatureData.substring(0, 50) + "..."
-    );
-
-  } catch (signatureErr) {
-    console.error(
-      "❌ Failed to create Syncro signature:",
-      signatureErr.response?.data || signatureErr.message
-    );
-  }
-}
-
-    
-    // ---------------------------------------------------------------
-    // Build Notes
-    // 
-    // ---------------------------------------------------------------
+    // ============================================================
+    // BUILD NOTES
+    // ============================================================
 
     const notesstring = [
       `Stripe Terminal Payment`,
@@ -322,14 +313,12 @@ if (signatureFileId) {
       }`,
       `Signature File: ${signatureFileId || "N/A"}`,
       `Signature URL: ${signatureUrl || "N/A"}`,
-      `Stripe Invoice: ${stripeInvoiceId || "N/A"}`,
-    ]
-      .join(" | ");
+    ].join(" | ");
 
-    // ---------------------------------------------------------------
-    // Build Transaction Response
-    // Syncro field is varchar(255), so keep it under 255 characters
-    // ---------------------------------------------------------------
+
+    // ============================================================
+    // TRANSACTION RESPONSE
+    // ============================================================
 
     const transactionresponse = [
       `Card: ${cardPresent.description || cardPresent.brand || "N/A"}`,
@@ -344,19 +333,21 @@ if (signatureFileId) {
       }/${cardPresent.exp_year || "N/A"}`,
       `PI: ${stripePaymentIntentId || "N/A"}`,
       `Charge: ${stripePayment?.latest_charge || "N/A"}`,
-       ]
+    ]
       .join(" | ")
       .substring(0, 255);
 
-    // ---------------------------------------------------------------
-    // Build Syncro Payment Payload
-    // ---------------------------------------------------------------
+
+    // ============================================================
+    // SYNCRO PAYMENT PAYLOAD
+    // ============================================================
 
     const payload = {
       payment: {
-        customer_id: isNaN(parsedCustomerId)
-          ? 0
-          : parsedCustomerId,
+        customer_id:
+          isNaN(parsedCustomerId)
+            ? 0
+            : parsedCustomerId,
 
         invoice_id: parsedInvoiceId,
 
@@ -364,17 +355,15 @@ if (signatureFileId) {
 
         amount_cents: totalCents,
 
-        payment_method: "Stripe Terminal (Signed in Stripe)",
+        payment_method:
+          "Stripe Terminal (Signed in Stripe)",
 
         signature_name:
-  `${customerData.firstname || ""} ${customerData.lastname || ""}`.trim(),
+          `${customerData.firstname || ""} ${customerData.lastname || ""}`.trim(),
 
-signature_data: syncroSignatureData,
-base64_png: syncroSignatureData,
-
-signature_date: signatureFileId
-  ? new Date().toISOString()
-  : null,
+        signature_date: signatureFileId
+          ? new Date().toISOString()
+          : null,
 
         ref_num: referenceString,
 
@@ -386,19 +375,26 @@ signature_date: signatureFileId
 
         action: "Test",
 
-        address_state: customerData.state || "",
+        address_state:
+          customerData.state || "",
 
-        transaction_response: transactionresponse,
+        transaction_response:
+          transactionresponse,
 
-        address_street: customerData.address || "",
+        address_street:
+          customerData.address || "",
 
-        address_city: customerData.city || "",
+        address_city:
+          customerData.city || "",
 
-        address_zip: customerData.zip || "",
+        address_zip:
+          customerData.zip || "",
 
-        first_name: customerData.firstname || "",
+        first_name:
+          customerData.firstname || "",
 
-        last_name: customerData.lastname || "",
+        last_name:
+          customerData.lastname || "",
 
         invoice_payments_attributes: [
           {
@@ -410,113 +406,127 @@ signature_date: signatureFileId
       },
     };
 
-    console.log("===== SYNCRO PAYMENT PAYLOAD =====");
-    console.log(JSON.stringify(payload, null, 2));
 
-    // ---------------------------------------------------------------
-    // Send Payment to Syncro
-    // ---------------------------------------------------------------
+    // ============================================================
+    // CREATE SYNCRO PAYMENT
+    // ============================================================
 
-    const syncroResponse = await axios.post(
-      `https://${SYNCRO_SUBDOMAIN}.syncromsp.com/api/v1/payments?api_key=${SYNCRO_API_KEY}`,
-      payload,
-      {
-        headers: {
-          "Content-Type": "application/json",
-        },
-      }
-    );
-
-console.log("===== SIGNATURE CHECK =====");
-console.log({
-  sentSignature: !!syncroSignatureData,
-  sentLength: syncroSignatureData?.length,
-  returnedSignatureData: !!syncroResponse.data?.payment?.signature_data,
-  returnedBase64Png: !!syncroResponse.data?.payment?.base64_png,
-});
-    
-// ---------------------------------------------------------------
-// Attach Stripe Terminal signature to Syncro ticket
-// ---------------------------------------------------------------
-
-if (signatureFileId) {
-  await attachSignatureToSyncroTicket(
-    cleanInvoiceId,
-    signatureFileId
-  );
-}
-    
-
-    
-    // ---------------------------------------------------------------
-    // Syncro Response
-    // ---------------------------------------------------------------
-
-    console.log("===== SYNCRO PAYMENT RESPONSE =====");
-    console.log(JSON.stringify(syncroResponse.data, null, 2));
-
-    console.log("===== PAYMENT OBJECT KEYS =====");
     console.log(
-      Object.keys(syncroResponse.data?.payment || {})
+      "===== SYNCRO PAYMENT PAYLOAD ====="
     );
 
-    // ---------------------------------------------------------------
-    // Verify Syncro Invoice
-    // ---------------------------------------------------------------
+    console.log(
+      JSON.stringify(payload, null, 2)
+    );
 
-    try {
-      const verifyInvoice = await axios.get(
-        `https://${SYNCRO_SUBDOMAIN}.syncromsp.com/api/v1/invoices/${cleanInvoiceId}?api_key=${SYNCRO_API_KEY}`
+    const syncroResponse =
+      await axios.post(
+        `https://${SYNCRO_SUBDOMAIN}.syncromsp.com/api/v1/payments?api_key=${SYNCRO_API_KEY}`,
+        payload,
+        {
+          headers: {
+            "Content-Type": "application/json",
+          },
+        }
       );
 
-      console.log("===== SYNCRO INVOICE AFTER PAYMENT =====");
-      console.log("===== FULL SYNCRO INVOICE =====");
-      console.log(JSON.stringify(verifyInvoice.data, null, 2));
+    console.log(
+      "===== SYNCRO PAYMENT CREATED ====="
+    );
+
+    console.log(
+      JSON.stringify(
+        syncroResponse.data,
+        null,
+        2
+      )
+    );
+
+
+    // ============================================================
+    // ATTACH SIGNATURE
+    // ============================================================
+
+    if (signatureFileId) {
+      console.log(
+        `📎 Attempting to attach signature ${signatureFileId}`
+      );
+
+      await attachSignatureToSyncroTicket(
+        cleanInvoiceId,
+        signatureFileId
+      );
+    }
+
+
+    // ============================================================
+    // VERIFY INVOICE
+    // ============================================================
+
+    try {
+      const verifyInvoice =
+        await axios.get(
+          `https://${SYNCRO_SUBDOMAIN}.syncromsp.com/api/v1/invoices/${cleanInvoiceId}?api_key=${SYNCRO_API_KEY}`
+        );
+
+      console.log(
+        "===== SYNCRO INVOICE AFTER PAYMENT ====="
+      );
+
       console.log(
         JSON.stringify(
-          {
-            id: verifyInvoice.data.invoice?.id,
-            status: verifyInvoice.data.invoice?.status,
-            balance_due:
-              verifyInvoice.data.invoice?.balance_due,
-            paid: verifyInvoice.data.invoice?.paid,
-            payment_status:
-              verifyInvoice.data.invoice?.payment_status,
-          },
+          verifyInvoice.data,
           null,
           2
         )
       );
+
     } catch (verifyErr) {
       console.error(
         "❌ Syncro invoice verification failed:",
-        verifyErr.response?.data || verifyErr.message
+        verifyErr.response?.data ||
+        verifyErr.message
       );
     }
 
-    // ---------------------------------------------------------------
-    // Update payment status
-    // ---------------------------------------------------------------
 
-    invoicePaymentStatus.set(cleanInvoiceId, {
-      status: "paid",
-      stage: null,
-      amount: amountString,
-      stripe_invoice_id: stripeInvoiceId || "",
-    });
+    // ============================================================
+    // UPDATE STATUS
+    // ============================================================
+
+    invoicePaymentStatus.set(
+      cleanInvoiceId,
+      {
+        status: "paid",
+        stage: null,
+        amount: amountString,
+        stripe_invoice_id:
+          stripeInvoiceId || "",
+      }
+    );
 
     console.log(
-      `✅ Syncro Invoice #${cleanInvoiceId} marked PAID ($${amountString}). Link: Stripe ${stripeInvoiceId || "N/A"}`
+      `✅ Syncro Invoice #${cleanInvoiceId} marked PAID ($${amountString}).`
     );
+
   } catch (err) {
-    processedSyncroPayments.delete(syncroKey);
+
+    processedSyncroPayments.delete(
+      syncroKey
+    );
 
     console.error(
       "❌ Syncro Payment API error:",
-      err.response?.data || err.message
+      err.response?.data ||
+      err.message
     );
   }
 }
+
+
+// ================================================================
+// EXPORTS
+// ================================================================
 
 module.exports = {
   recordSyncroPayment,
