@@ -427,6 +427,14 @@ signature_date: signatureFileId
       }
     );
 
+console.log("===== SIGNATURE CHECK =====");
+console.log({
+  sentSignature: !!syncroSignatureData,
+  sentLength: syncroSignatureData?.length,
+  returnedSignatureData: !!syncroResponse.data?.payment?.signature_data,
+  returnedBase64Png: !!syncroResponse.data?.payment?.base64_png,
+});
+    
 // ---------------------------------------------------------------
 // Attach Stripe Terminal signature to Syncro ticket
 // ---------------------------------------------------------------
@@ -438,13 +446,7 @@ if (signatureFileId) {
   );
 }
     
-console.log("===== SIGNATURE CHECK =====");
-console.log({
-  sentSignature: !!syncroSignatureData,
-  sentLength: syncroSignatureData?.length,
-  returnedSignatureData: !!syncroResponse.data?.payment?.signature_data,
-  returnedBase64Png: !!syncroResponse.data?.payment?.base64_png,
-});
+
     
     // ---------------------------------------------------------------
     // Syncro Response
@@ -519,4 +521,5 @@ console.log({
 module.exports = {
   recordSyncroPayment,
   clearTerminalReaderDisplay,
+  attachSignatureToSyncroTicket,
 };
