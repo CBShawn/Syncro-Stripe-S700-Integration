@@ -217,13 +217,13 @@ async function recordSyncroPayment(
 
         action: "Test",
 
-        card_type: ${cardPresent.brand || "N/A"}`,
+        `Card Type: ${cardPresent.brand || "N/A"}`,
 
         address_state: customerData.state || "",
 
         transaction_response: transactionresponse,
 
-        card_expiration: ${
+        `card_expiration: ${
         cardPresent.exp_month
           ? String(cardPresent.exp_month).padStart(2, "0")
           : "N/A"
