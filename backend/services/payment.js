@@ -13,6 +13,108 @@ const PORT = process.env.PORT || 3000;
 const SYNCRO_SUBDOMAIN = process.env.SYNCRO_SUBDOMAIN;
 const SYNCRO_API_KEY = process.env.SYNCRO_API_KEY;
 
+async function attachSignatureToSyncroTicket(
+  syncroInvoiceId,
+  signatureFileId
+) {
+  if (!syncroInvoiceId || !signatureFileId) {
+    console.log(
+      "ℹ️ Cannot attach signature: missing invoice ID or signature file ID"
+    );
+    return null;
+  }
+
+  try {
+    // -------------------------------------------------------------
+    // Find the ticket associated with the Syncro invoice
+    // -------------------------------------------------------------
+
+    const ticketResponse = await axios.get(
+      `https://${SYNCRO_SUBDOMAIN}.syncromsp.com/api/v1/invoices/${syncroInvoiceId}/ticket?api_key=${SYNCRO_API_KEY}`
+    );
+
+    const ticket =
+      ticketResponse.data?.ticket ||
+      ticketResponse.data;
+
+    const ticketId = ticket?.id;
+
+    if (!ticketId) {
+      console.warn(
+        `⚠️ Syncro Invoice #${syncroInvoiceId} has no linked ticket.`
+      );
+
+      return null;
+    }
+
+    console.log(
+      `📎 Invoice #${syncroInvoiceId} is linked to Ticket #${ticketId}`
+    );
+
+    // -------------------------------------------------------------
+    // URL that Syncro will fetch
+    // -------------------------------------------------------------
+
+    const baseUrl =
+      process.env.RENDER_EXTERNAL_URL ||
+      process.env.BASE_URL ||
+      `http://localhost:${PORT}`;
+
+    const signatureUrl =
+      `${baseUrl}/api/signature/${encodeURIComponent(signatureFileId)}`;
+
+    console.log(
+      `📎 Attaching Stripe signature to Syncro Ticket #${ticketId}`
+    );
+
+    console.log(
+      `📎 Signature URL: ${signatureUrl}`
+    );
+
+    // -------------------------------------------------------------
+    // Attach URL to Syncro ticket
+    // -------------------------------------------------------------
+
+    const attachResponse = await axios.post(
+      `https://${SYNCRO_SUBDOMAIN}.syncromsp.com/api/v1/tickets/${ticketId}/attach_file_url?api_key=${SYNCRO_API_KEY}`,
+      {
+        url: signatureUrl,
+        file_url: signatureUrl,
+        filename: `invoice-${syncroInvoiceId}-signature.svg`,
+      },
+      {
+        headers: {
+          "Content-Type": "application/json",
+        },
+      }
+    );
+
+    console.log(
+      "✅ Signature successfully attached to Syncro ticket"
+    );
+
+    console.log(
+      JSON.stringify(attachResponse.data, null, 2)
+    );
+
+    return {
+      ticketId,
+      signatureUrl,
+      response: attachResponse.data,
+    };
+
+  } catch (err) {
+    console.error(
+      "❌ Failed to attach signature to Syncro ticket:",
+      err.response?.data || err.message
+    );
+
+    return null;
+  }
+}
+
+
+
 async function clearTerminalReaderDisplay(readerId) {
   if (!readerId) return;
 
