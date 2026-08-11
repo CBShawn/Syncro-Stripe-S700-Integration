@@ -268,6 +268,7 @@ if (signatureFileId) {
   `${customerData.firstname || ""} ${customerData.lastname || ""}`.trim(),
 
 signature_data: syncroSignatureData,
+base64_png: syncroSignatureData,
 
 signature_date: signatureFileId
   ? new Date().toISOString()
