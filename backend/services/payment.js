@@ -2,6 +2,7 @@ const axios = require("axios");
 
 const Stripe = require("stripe");
 const stripe = Stripe(process.env.STRIPE_SECRET_KEY);
+const sharp = require("sharp");
 
 const {
   invoicePaymentStatus,
@@ -138,6 +139,11 @@ async function recordSyncroPayment(
 // ---------------------------------------------------------------
 // Download Stripe Terminal signature as SVG
 // ---------------------------------------------------------------
+const sharp = require("sharp");
+
+// ---------------------------------------------------------------
+// Get Stripe signature and convert SVG → PNG data URL
+// ---------------------------------------------------------------
 
 let syncroSignatureData = "";
 
@@ -151,37 +157,40 @@ if (signatureFileId) {
       filename: stripeFile.filename,
       type: stripeFile.type,
       size: stripeFile.size,
-      url: stripeFile.url,
     });
 
-    const signatureResponse = await axios.get(
-      stripeFile.url,
-      {
-        headers: {
-          Authorization:
-            `Bearer ${process.env.STRIPE_SECRET_KEY}`,
-        },
-        responseType: "text",
-      }
-    );
+    const signatureResponse = await axios.get(stripeFile.url, {
+      auth: {
+        username: process.env.STRIPE_SECRET_KEY,
+        password: "",
+      },
+      responseType: "arraybuffer",
+    });
 
-    syncroSignatureData = signatureResponse.data;
+    // Convert Stripe SVG → PNG
+    const pngBuffer = await sharp(
+      Buffer.from(signatureResponse.data)
+    )
+      .png()
+      .toBuffer();
+
+    // This is the value that goes to Syncro
+    syncroSignatureData =
+      `data:image/png;base64,${pngBuffer.toString("base64")}`;
 
     console.log(
-      "===== STRIPE SIGNATURE SVG DOWNLOADED ====="
-    );
-    console.log(
-      "Signature SVG length:",
-      syncroSignatureData.length
+      "✅ syncroSignatureData created:",
+      syncroSignatureData.substring(0, 50) + "..."
     );
 
   } catch (signatureErr) {
     console.error(
-      "❌ Failed to download Stripe signature:",
+      "❌ Failed to create Syncro signature:",
       signatureErr.response?.data || signatureErr.message
     );
   }
 }
+
     
     // ---------------------------------------------------------------
     // Build Notes
