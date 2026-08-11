@@ -219,7 +219,9 @@ async function recordSyncroPayment(
 
         card_type: "Test",
 
-        card_exp: "Test",
+        date_month: "Test",
+
+        date_year: "Test",
 
         address_state: customerData.state || "",
 
