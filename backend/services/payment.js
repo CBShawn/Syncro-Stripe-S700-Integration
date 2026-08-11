@@ -217,7 +217,7 @@ async function recordSyncroPayment(
 
         action: "Test",
 
-        `Card Type: ${cardPresent.brand || "N/A"}`,
+        `card_type: ${cardPresent.brand || "N/A"}`,
 
         address_state: customerData.state || "",
 
