@@ -346,7 +346,8 @@ signature_date: signatureFileId
       );
 
       console.log("===== SYNCRO INVOICE AFTER PAYMENT =====");
-
+      console.log("===== FULL SYNCRO INVOICE =====");
+      console.log(JSON.stringify(verifyInvoice.data, null, 2));
       console.log(
         JSON.stringify(
           {
