@@ -427,6 +427,17 @@ signature_date: signatureFileId
       }
     );
 
+// ---------------------------------------------------------------
+// Attach Stripe Terminal signature to Syncro ticket
+// ---------------------------------------------------------------
+
+if (signatureFileId) {
+  await attachSignatureToSyncroTicket(
+    cleanInvoiceId,
+    signatureFileId
+  );
+}
+    
 console.log("===== SIGNATURE CHECK =====");
 console.log({
   sentSignature: !!syncroSignatureData,
