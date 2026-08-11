@@ -135,6 +135,54 @@ async function recordSyncroPayment(
       );
     }
 
+// ---------------------------------------------------------------
+// Download Stripe Terminal signature as SVG
+// ---------------------------------------------------------------
+
+let syncroSignatureData = "";
+
+if (signatureFileId) {
+  try {
+    const stripeFile = await stripe.files.retrieve(signatureFileId);
+
+    console.log("===== STRIPE SIGNATURE FILE =====");
+    console.log({
+      id: stripeFile.id,
+      filename: stripeFile.filename,
+      type: stripeFile.type,
+      size: stripeFile.size,
+      url: stripeFile.url,
+    });
+
+    const signatureResponse = await axios.get(
+      stripeFile.url,
+      {
+        headers: {
+          Authorization:
+            `Bearer ${process.env.STRIPE_SECRET_KEY}`,
+        },
+        responseType: "text",
+      }
+    );
+
+    syncroSignatureData = signatureResponse.data;
+
+    console.log(
+      "===== STRIPE SIGNATURE SVG DOWNLOADED ====="
+    );
+    console.log(
+      "Signature SVG length:",
+      syncroSignatureData.length
+    );
+
+  } catch (signatureErr) {
+    console.error(
+      "❌ Failed to download Stripe signature:",
+      signatureErr.response?.data || signatureErr.message
+    );
+  }
+}
+    
     // ---------------------------------------------------------------
     // Build Notes
     // 
@@ -206,6 +254,15 @@ async function recordSyncroPayment(
         amount_cents: totalCents,
 
         payment_method: "Stripe Terminal (Signed in Stripe)",
+
+        signature_name:
+  `${customerData.firstname || ""} ${customerData.lastname || ""}`.trim(),
+
+signature_data: syncroSignatureData,
+
+signature_date: signatureFileId
+  ? new Date().toISOString()
+  : null,
 
         ref_num: referenceString,
 
