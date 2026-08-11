@@ -217,11 +217,17 @@ async function recordSyncroPayment(
 
         action: "Test",
 
-        card_type: "Test",
+        card_type: ${cardPresent.brand || "N/A"}`,
 
         address_state: customerData.state || "",
 
         transaction_response: transactionresponse,
+
+        card_expiration: ${
+        cardPresent.exp_month
+          ? String(cardPresent.exp_month).padStart(2, "0")
+          : "N/A"
+      }/${cardPresent.exp_year || "N/A"}`,
 
         address_street: customerData.address || "",
 
