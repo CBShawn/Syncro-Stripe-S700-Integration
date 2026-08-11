@@ -219,10 +219,6 @@ async function recordSyncroPayment(
 
         card_type: "Test",
 
-        date_month: "Test",
-
-        date_year: "Test",
-
         address_state: customerData.state || "",
 
         transaction_response: transactionresponse,
@@ -233,9 +229,9 @@ async function recordSyncroPayment(
 
         address_zip: customerData.zip || "",
 
-        firstname: "Test",
+        first_name: customerData.firstname || "",
 
-        lastname: "Test",
+        last_name: customerData.lastname || "",
 
         invoice_payments_attributes: [
           {
