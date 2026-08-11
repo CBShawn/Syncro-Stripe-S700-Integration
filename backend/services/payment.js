@@ -233,9 +233,9 @@ async function recordSyncroPayment(
 
         address_zip: customerData.zip || "",
 
-        firstname: customerData.firstname || "",
+        firstname: "Test",
 
-        lastname: customerData.lastname || "",
+        lastname: "Test",
 
         invoice_payments_attributes: [
           {
