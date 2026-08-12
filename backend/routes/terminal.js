@@ -3,8 +3,7 @@ const router = express.Router();
 const axios = require("axios");
 
 const { 
-  setTerminalReaderDisplay,
-  setReaderMessage
+  setTerminalReaderDisplay 
 } = require("../services/terminalService");
 const stripe = require("../services/stripe");
 const syncro = require("../services/syncroService");
@@ -53,9 +52,7 @@ router.post("/pay-and-sign", async (req, res) => {
     if (!hasExplicitAmount || !syncroCustomerId || !customerEmail || needsLineItems) {
       console.log(`ℹ️ Fetching Invoice #${syncroInvoiceId} directly from Syncro API to fill missing data...`);
       try {
-       
-        const invoiceData =
-        await syncro.getInvoice(syncroInvoiceId);
+        const invoiceData = await syncro.getInvoice(syncroInvoiceId);
         
         if (invoiceData) {
           if (!hasExplicitAmount) {
@@ -162,37 +159,31 @@ router.post("/pay-and-sign", async (req, res) => {
     // Store PaymentIntent ID mapped to reader for pre-dip card trigger
     activeReaderIntents.set(String(readerId), paymentIntent.id);
 
-  await setTerminalReaderDisplay(
-  readerId,
-  lineItems,
-  totalChargeCents,
-  feeSaverCents
-);
+    // Display Cart items on Reader screen
+    await setTerminalReaderDisplay(
+      readerId,
+      lineItems,
+      totalChargeCents,
+      feeSaverCents
+    );
 
-// Give customer time to review cart
-await new Promise(resolve => setTimeout(resolve, 5000));
+    // Brief delay to allow customer cart review before opening payment reader
+    await new Promise((resolve) => setTimeout(resolve, 3000));
 
-// Update screen before switching to payment mode
-// transition screen
-await setReaderMessage(
-  readerId,
-  "Please wait while payment is being processed"
-);
+    // Start payment collection directly (S700 automatically updates display)
+    const processPayload = new URLSearchParams();
+    processPayload.append("payment_intent", paymentIntent.id);
 
-// Start payment collection
-const processPayload = new URLSearchParams();
-processPayload.append("payment_intent", paymentIntent.id);
-
-await axios.post(
-  `https://api.stripe.com/v1/terminal/readers/${readerId}/process_payment_intent`,
-  processPayload.toString(),
-  {
-    headers: {
-      Authorization: `Bearer ${process.env.STRIPE_SECRET_KEY}`,
-      "Content-Type": "application/x-www-form-urlencoded",
-    },
-  }
-);
+    await axios.post(
+      `https://api.stripe.com/v1/terminal/readers/${readerId}/process_payment_intent`,
+      processPayload.toString(),
+      {
+        headers: {
+          Authorization: `Bearer ${process.env.STRIPE_SECRET_KEY}`,
+          "Content-Type": "application/x-www-form-urlencoded",
+        },
+      }
+    );
 
     console.log(`✅ Cart display and pre-dip payment intent (${paymentIntent.id}) active on Reader ${readerId}`);
 
@@ -209,4 +200,3 @@ await axios.post(
 });
 
 module.exports = router;
-
