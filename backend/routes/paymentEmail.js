@@ -11,7 +11,7 @@ const stripe = new Stripe(process.env.STRIPE_SECRET_KEY, {
   timeout: 10000, // 10s Stripe API timeout
 });
 
-// Configure Email Transporter with STRICT timeouts
+// Configure Email Transporter with STRICT timeouts and forced IPv4
 const transporter = nodemailer.createTransport({
   host: process.env.SMTP_HOST,
   port: parseInt(process.env.SMTP_PORT || "587", 10),
@@ -20,9 +20,13 @@ const transporter = nodemailer.createTransport({
     user: process.env.SMTP_USER,
     pass: process.env.SMTP_PASS,
   },
+  family: 4, // CRITICAL: Force IPv4 DNS resolution (prevents ENETUNREACH on IPv6)
+  tls: {
+    rejectUnauthorized: false, // Prevents hanging on strict SSL handshakes
+  },
   connectionTimeout: 5000, // 5s connection timeout
   greetingTimeout: 5000,   // 5s greeting timeout
-  socketTimeout: 10000,    // 10s socket timeout
+  socketTimeout: 8000,     // 8s socket timeout
 });
 
 router.post("/send-payment-email", async (req, res) => {
@@ -121,7 +125,7 @@ router.post("/send-payment-email", async (req, res) => {
 
     console.log(`➡️ [5/6] Stripe Session created: ${session.id}`);
 
-    // 4. Send Email via Nodemailer
+    // 4. Send Email via Nodemailer (With Fallback)
     const emailHtml = `
       <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 20px; border: 1px solid #e0e0e0; border-radius: 6px;">
         <h2 style="color: #333;">Payment Request for Invoice #${invoice.number}</h2>
@@ -138,17 +142,31 @@ router.post("/send-payment-email", async (req, res) => {
     `;
 
     console.log(`➡️ [6/6] Sending Email to ${customerEmail}...`);
-    await transporter.sendMail({
-      from: process.env.EMAIL_FROM || process.env.SMTP_USER,
-      to: customerEmail,
-      subject: `Payment Requested: Invoice #${invoice.number}`,
-      html: emailHtml,
-    });
+    let emailSent = false;
+    let emailError = null;
 
-    console.log("✅ Success! Responding to client.");
+    try {
+      await transporter.sendMail({
+        from: process.env.EMAIL_FROM || process.env.SMTP_USER,
+        to: customerEmail,
+        subject: `Payment Requested: Invoice #${invoice.number}`,
+        html: emailHtml,
+      });
+      console.log("✅ Email successfully sent via Nodemailer!");
+      emailSent = true;
+    } catch (mailErr) {
+      console.error("⚠️ Nodemailer failed to send email:", mailErr.message);
+      emailError = mailErr.message;
+    }
+
+    console.log("✅ Responding to client.");
     return res.json({
       success: true,
-      message: `Payment link generated and emailed to ${customerEmail}`,
+      emailSent: emailSent,
+      paymentUrl: session.url,
+      message: emailSent
+        ? `Payment link generated and emailed to ${customerEmail}`
+        : `Payment link generated, but email failed: ${emailError}`,
     });
 
   } catch (err) {
