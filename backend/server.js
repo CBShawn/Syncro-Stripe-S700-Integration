@@ -15,6 +15,7 @@ const webhookRoute = require("./routes/webhook");
 const statusRoutes = require("./routes/status");
 const signatureRoutes = require("./routes/signature");
 const terminalRoutes = require("./routes/terminal");
+const paymentEmailRoute = require("./routes/paymentEmail"); // New Route
 
 const app = express();
 const PORT = config.PORT;
@@ -36,6 +37,7 @@ app.use("/api/stripe/webhook", webhookRoute);
 app.use("/", statusRoutes);
 app.use("/", signatureRoutes);
 app.use("/api/terminal", terminalRoutes);
+app.use("/api", paymentEmailRoute); // Registers /api/send-payment-email
 
 app.get("/", (req, res) => {
   res.json({
