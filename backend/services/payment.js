@@ -92,7 +92,7 @@ async function attachSignatureToSyncroInvoice(
 
     const signatureResponseSyncro =
       await axios.post(
-        `https://${SYNCRO_SUBDOMAIN}.syncromsp.com/api/v1/invoices/${syncroInvoiceId}/signature?api_key=${SYNCRO_API_KEY}`,
+        `https://${SYNCRO_SUBDOMAIN}.syncromsp.com/invoices/${syncroInvoiceId}/signature`,
         formData.toString(),
         {
           headers: {
