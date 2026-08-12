@@ -6,12 +6,15 @@ const axios = require("axios");
 const nodemailer = require("nodemailer");
 const config = require("../config");
 
+// Ensure JSON body parsing is active for this route
+router.use(express.json());
+
 const stripe = new Stripe(process.env.STRIPE_SECRET_KEY);
 
 // Configure Email Transporter (SMTP)
 const transporter = nodemailer.createTransport({
   host: process.env.SMTP_HOST,
-  port: process.env.SMTP_PORT || 587,
+  port: parseInt(process.env.SMTP_PORT || "587", 10),
   secure: process.env.SMTP_SECURE === "true", // true for 465, false for other ports
   auth: {
     user: process.env.SMTP_USER,
@@ -26,31 +29,48 @@ router.post("/send-payment-email", async (req, res) => {
     return res.status(401).json({ success: false, error: "Unauthorized extension key." });
   }
 
-  const { invoiceId, amount, customerId } = req.body;
+  const { invoiceId, amount, customerId } = req.body || {};
 
   if (!invoiceId) {
     return res.status(400).json({ success: false, error: "Missing invoiceId." });
   }
 
   try {
-    // 1. Fetch Invoice Details from SyncroMSP
     const syncroSubdomain = process.env.SYNCRO_SUBDOMAIN;
     const syncroApiKey = process.env.SYNCRO_API_KEY;
 
+    // 1. Fetch Invoice Details from SyncroMSP using API Key query parameter
     const syncroRes = await axios.get(
-      `https://${syncroSubdomain}.syncromsp.com/api/v1/invoices/${invoiceId}`,
-      { headers: { Authorization: `Bearer ${syncroApiKey}` } }
+      `https://${syncroSubdomain}.syncromsp.com/api/v1/invoices/${invoiceId}?api_key=${syncroApiKey}`
     );
 
-    const invoice = syncroRes.data.invoice;
+    const invoice = syncroRes.data?.invoice;
+
+    if (!invoice) {
+      return res.status(404).json({ success: false, error: "Syncro invoice not found." });
+    }
 
     if (invoice.paid || invoice.balance_due <= 0) {
       return res.status(400).json({ success: false, error: "Invoice is already paid or has no balance due." });
     }
 
-    const customerEmail = invoice.customer_email || invoice.customer?.email;
+    // Resolve customer email (first check invoice, then fetch customer if needed)
+    let customerEmail = invoice.customer_email || invoice.customer?.email;
+
+    if (!customerEmail && (customerId || invoice.customer_id)) {
+      const targetCustomerId = customerId || invoice.customer_id;
+      try {
+        const custRes = await axios.get(
+          `https://${syncroSubdomain}.syncromsp.com/api/v1/customers/${targetCustomerId}?api_key=${syncroApiKey}`
+        );
+        customerEmail = custRes.data?.customer?.email;
+      } catch (custErr) {
+        console.warn("⚠️ Could not fetch customer record for email fallback:", custErr.message);
+      }
+    }
+
     if (!customerEmail) {
-      return res.status(400).json({ success: false, error: "No customer email found on this Syncro invoice." });
+      return res.status(400).json({ success: false, error: "No customer email found on this Syncro invoice or customer record." });
     }
 
     const amountInCents = Math.round((invoice.balance_due || amount) * 100);
@@ -80,7 +100,7 @@ router.post("/send-payment-email", async (req, res) => {
       customer_email: customerEmail,
       metadata: {
         syncro_invoice_id: String(invoice.id),
-        syncro_customer_id: String(customerId || invoice.customer_id),
+        syncro_customer_id: String(customerId || invoice.customer_id || ""),
       },
       success_url: `https://${syncroSubdomain}.syncromsp.com/invoices/${invoice.id}?payment=success`,
       cancel_url: `https://${syncroSubdomain}.syncromsp.com/invoices/${invoice.id}?payment=cancelled`,
@@ -109,13 +129,15 @@ router.post("/send-payment-email", async (req, res) => {
       html: emailHtml,
     });
 
+    console.log(`✅ Payment link generated and emailed to ${customerEmail}`);
+
     return res.json({
       success: true,
       message: `Payment link generated and emailed to ${customerEmail}`,
     });
   } catch (err) {
-    console.error("❌ Send Payment Email Error:", err);
-    return res.status(500).json({ success: false, error: err.message });
+    console.error("❌ Send Payment Email Error:", err.response?.data || err.message);
+    return res.status(500).json({ success: false, error: err.response?.data?.message || err.message });
   }
 });
 
