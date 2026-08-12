@@ -3,7 +3,9 @@ const express = require("express");
 const router = express.Router();
 const Stripe = require("stripe");
 const axios = require("axios");
-const nodemailer = require("nodemailer");
+const { ClientSecretCredential } = require("@azure/identity");
+const { Client } = require("@microsoft/microsoft-graph-client");
+require("isomorphic-fetch");
 
 router.use(express.json());
 
@@ -11,26 +13,21 @@ const stripe = new Stripe(process.env.STRIPE_SECRET_KEY, {
   timeout: 10000, // 10s Stripe API timeout
 });
 
-// Configure Office 365 Nodemailer Transporter using OAuth2 with explicit Tenant ID
-const transporter = nodemailer.createTransport({
-  host: "smtp.office365.com",
-  port: 587,
-  secure: false, // STARTTLS
-  auth: {
-    type: "OAuth2",
-    user: process.env.O365_USER_EMAIL,
-    clientId: process.env.O365_CLIENT_ID,
-    clientSecret: process.env.O365_CLIENT_SECRET,
-    refreshToken: process.env.O365_REFRESH_TOKEN,
-    tenantId: process.env.O365_TENANT_ID, // Critical: Forces local tenant authority
+// Configure Azure Application Authentication (No Refresh Token Needed!)
+const credential = new ClientSecretCredential(
+  process.env.O365_TENANT_ID,
+  process.env.O365_CLIENT_ID,
+  process.env.O365_CLIENT_SECRET
+);
+
+// Initialize Microsoft Graph Client
+const graphClient = Client.initWithMiddleware({
+  authProvider: {
+    getAccessToken: async () => {
+      const token = await credential.getToken("https://graph.microsoft.com/.default");
+      return token.token;
+    },
   },
-  family: 4, // Force IPv4 to prevent Render ENETUNREACH issues
-  tls: {
-    rejectUnauthorized: false, // Avoid strict handshake hangs
-  },
-  connectionTimeout: 8000, // 8s connection timeout
-  greetingTimeout: 8000,   // 8s greeting timeout
-  socketTimeout: 12000,    // 12s socket timeout
 });
 
 router.post("/send-payment-email", async (req, res) => {
@@ -129,7 +126,7 @@ router.post("/send-payment-email", async (req, res) => {
 
     console.log(`➡️ [5/6] Stripe Session created: ${session.id}`);
 
-    // 4. Send Email via Office 365 OAuth2 (With Fallback)
+    // 4. Send Email via Microsoft Graph API
     const emailHtml = `
       <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 20px; border: 1px solid #e0e0e0; border-radius: 6px;">
         <h2 style="color: #333;">Payment Request for Invoice #${invoice.number}</h2>
@@ -145,22 +142,40 @@ router.post("/send-payment-email", async (req, res) => {
       </div>
     `;
 
-    console.log(`➡️ [6/6] Sending Email via Office 365 OAuth2 to ${customerEmail}...`);
+    console.log(`➡️ [6/6] Sending Email via Graph API to ${customerEmail}...`);
     let emailSent = false;
     let emailError = null;
 
     try {
-      await transporter.sendMail({
-        from: process.env.O365_USER_EMAIL,
-        to: customerEmail,
-        subject: `Payment Requested: Invoice #${invoice.number}`,
-        html: emailHtml,
-      });
-      console.log("✅ Email successfully sent via Office 365 OAuth2!");
+      const senderEmail = process.env.O365_USER_EMAIL; // Sender address (e.g., shawn@codeblackit.com)
+
+      const mailPayload = {
+        message: {
+          subject: `Payment Requested: Invoice #${invoice.number}`,
+          body: {
+            contentType: "HTML",
+            content: emailHtml,
+          },
+          toRecipients: [
+            {
+              emailAddress: {
+                address: customerEmail,
+              },
+            },
+          ],
+        },
+        saveToSentItems: true,
+      };
+
+      await graphClient
+        .api(`/users/${senderEmail}/sendMail`)
+        .post(mailPayload);
+
+      console.log("✅ Email successfully sent via Microsoft Graph API!");
       emailSent = true;
-    } catch (mailErr) {
-      console.error("⚠️ O365 Nodemailer failed to send email:", mailErr.message);
-      emailError = mailErr.message;
+    } catch (graphErr) {
+      console.error("⚠️ Microsoft Graph API failed to send email:", graphErr.message);
+      emailError = graphErr.message;
     }
 
     console.log("✅ Responding to client.");
