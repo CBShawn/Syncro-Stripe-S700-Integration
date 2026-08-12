@@ -11,22 +11,25 @@ const stripe = new Stripe(process.env.STRIPE_SECRET_KEY, {
   timeout: 10000, // 10s Stripe API timeout
 });
 
-// Configure Email Transporter with STRICT timeouts and forced IPv4
+// Configure Office 365 Nodemailer Transporter using OAuth2
 const transporter = nodemailer.createTransport({
-  host: process.env.SMTP_HOST,
-  port: parseInt(process.env.SMTP_PORT || "587", 10),
-  secure: process.env.SMTP_SECURE === "true",
+  host: "smtp.office365.com",
+  port: 587,
+  secure: false, // STARTTLS
   auth: {
-    user: process.env.SMTP_USER,
-    pass: process.env.SMTP_PASS,
+    type: "OAuth2",
+    user: process.env.O365_USER_EMAIL,
+    clientId: process.env.O365_CLIENT_ID,
+    clientSecret: process.env.O365_CLIENT_SECRET,
+    refreshToken: process.env.O365_REFRESH_TOKEN,
   },
-  family: 4, // CRITICAL: Force IPv4 DNS resolution (prevents ENETUNREACH on IPv6)
+  family: 4, // Force IPv4 to prevent Render ENETUNREACH issues
   tls: {
-    rejectUnauthorized: false, // Prevents hanging on strict SSL handshakes
+    rejectUnauthorized: false, // Avoid strict handshake hangs
   },
-  connectionTimeout: 5000, // 5s connection timeout
-  greetingTimeout: 5000,   // 5s greeting timeout
-  socketTimeout: 8000,     // 8s socket timeout
+  connectionTimeout: 8000, // 8s connection timeout
+  greetingTimeout: 8000,   // 8s greeting timeout
+  socketTimeout: 12000,    // 12s socket timeout
 });
 
 router.post("/send-payment-email", async (req, res) => {
@@ -125,7 +128,7 @@ router.post("/send-payment-email", async (req, res) => {
 
     console.log(`➡️ [5/6] Stripe Session created: ${session.id}`);
 
-    // 4. Send Email via Nodemailer (With Fallback)
+    // 4. Send Email via Office 365 OAuth2 (With Fallback)
     const emailHtml = `
       <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 20px; border: 1px solid #e0e0e0; border-radius: 6px;">
         <h2 style="color: #333;">Payment Request for Invoice #${invoice.number}</h2>
@@ -141,21 +144,21 @@ router.post("/send-payment-email", async (req, res) => {
       </div>
     `;
 
-    console.log(`➡️ [6/6] Sending Email to ${customerEmail}...`);
+    console.log(`➡️ [6/6] Sending Email via Office 365 OAuth2 to ${customerEmail}...`);
     let emailSent = false;
     let emailError = null;
 
     try {
       await transporter.sendMail({
-        from: process.env.EMAIL_FROM || process.env.SMTP_USER,
+        from: process.env.O365_USER_EMAIL,
         to: customerEmail,
         subject: `Payment Requested: Invoice #${invoice.number}`,
         html: emailHtml,
       });
-      console.log("✅ Email successfully sent via Nodemailer!");
+      console.log("✅ Email successfully sent via Office 365 OAuth2!");
       emailSent = true;
     } catch (mailErr) {
-      console.error("⚠️ Nodemailer failed to send email:", mailErr.message);
+      console.error("⚠️ O365 Nodemailer failed to send email:", mailErr.message);
       emailError = mailErr.message;
     }
 
