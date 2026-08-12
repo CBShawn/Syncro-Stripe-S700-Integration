@@ -22,7 +22,7 @@ const transporter = nodemailer.createTransport({
     clientId: process.env.O365_CLIENT_ID,
     clientSecret: process.env.O365_CLIENT_SECRET,
     refreshToken: process.env.O365_REFRESH_TOKEN,
-    tenantId: process.env.O365_TENANT_ID || "5f5900bb-52f2-4650-91d3-b2981fc95d6f", // Critical: Forces local tenant authority
+    tenantId: process.env.O365_TENANT_ID, // Critical: Forces local tenant authority
   },
   family: 4, // Force IPv4 to prevent Render ENETUNREACH issues
   tls: {
