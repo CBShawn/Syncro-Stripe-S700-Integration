@@ -5,16 +5,18 @@
     body { font-family: sans-serif; padding: 15px; width: 320px; }
     input { width: 100%; padding: 8px; margin-top: 5px; margin-bottom: 12px; box-sizing: border-box; }
     button { background: #635bff; color: white; border: none; padding: 8px 14px; border-radius: 4px; cursor: pointer; width: 100%; }
+    .note { font-size: 11px; color: #666; margin-top: -8px; margin-bottom: 12px; }
   </style>
 </head>
 <body>
-  <h3>S700 Settings</h3>
+  <h3>Stripe & Syncro Integration</h3>
   
-  <label for="apiUrl">Backend API URL:</label>
+  <label for="apiUrl">Render Backend API URL:</label>
   <input type="text" id="apiUrl" placeholder="https://syncro-stripe-s700-integration.onrender.com" />
   
-  <label for="authKey">Extension Secret Key (Optional):</label>
+  <label for="authKey">Extension Secret Key:</label>
   <input type="password" id="authKey" placeholder="Enter secret key if set in Render" />
+  <p class="note">Authenticates both S700 terminal actions and email payment links.</p>
 
   <button id="saveBtn">Save Settings</button>
   <p id="status" style="color: green; font-weight: bold;"></p>
