@@ -199,7 +199,7 @@ router.post(
       }
 
       // ================================================================
-      // 2. PAYMENT SUCCEEDED
+      // 2. PAYMENT SUCCEEDED (TERMINAL)
       // ================================================================
       if (event.type === "payment_intent.succeeded") {
         const pi = event.data.object;
@@ -342,6 +342,66 @@ router.post(
           }
         }
       }
+
+      // ================================================================
+      // 3. CHECKOUT SESSION COMPLETED (ONLINE EMAIL PAYMENTS - ACH & CARD)
+      // ================================================================
+      if (event.type === "checkout.session.completed") {
+        const session = event.data.object;
+        const metadata = session.metadata || {};
+
+        const syncroInvoiceId = metadata.syncro_invoice_id
+          ? String(metadata.syncro_invoice_id).trim()
+          : null;
+
+        const syncroCustomerId = metadata.syncro_customer_id
+          ? String(metadata.syncro_customer_id).trim()
+          : null;
+
+        const amountString = (session.amount_total / 100).toFixed(2);
+        const paymentIntentId = session.payment_intent
+          ? String(session.payment_intent)
+          : session.id;
+
+        console.log(
+          `💳 Checkout session completed for Syncro Invoice #${syncroInvoiceId} - Amount: $${amountString}`
+        );
+
+        if (syncroInvoiceId && syncroCustomerId) {
+          try {
+            await recordSyncroPayment(
+              syncroInvoiceId,
+              syncroCustomerId,
+              amountString,
+              paymentIntentId,
+              null, // No signature required for online checkout
+              null
+            );
+
+            // Update status cache so extension or UI reflects paid status immediately
+            invoicePaymentStatus.set(syncroInvoiceId, {
+              status: "paid",
+              amount: amountString,
+            });
+
+            invoiceCustomerCache.delete(syncroInvoiceId);
+
+            console.log(
+              `✅ Posted online ACH/Card payment of $${amountString} to Syncro Invoice #${syncroInvoiceId}`
+            );
+          } catch (syncroErr) {
+            console.error(
+              `❌ Failed to record online payment for Syncro Invoice #${syncroInvoiceId}:`,
+              syncroErr.message
+            );
+          }
+        } else {
+          console.warn(
+            "⚠️ checkout.session.completed missing syncro_invoice_id or syncro_customer_id in metadata."
+          );
+        }
+      }
+
     } catch (handlerErr) {
       console.error(
         "❌ Uncaught Exception inside Webhook Handler:",
