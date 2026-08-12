@@ -86,6 +86,29 @@ async function attachSignatureToSyncroInvoice(
       signatureData
     );
 
+    // Attach signature to Syncro via API
+    const response = await axios.post(
+      `https://${SYNCRO_SUBDOMAIN}.syncromsp.com/api/v1/invoices/${syncroInvoiceId}/signature?api_key=${SYNCRO_API_KEY}`,
+      formData,
+      {
+        headers: {
+          "Content-Type": "application/x-www-form-urlencoded",
+        },
+      }
+    );
+
+    console.log(`✅ Signature successfully attached to Syncro Invoice #${syncroInvoiceId}`);
+    return response.data;
+
+  } catch (err) {
+    console.error(
+      "❌ Failed to attach signature to Syncro Invoice:",
+      err.response?.data || err.message
+    );
+    return null;
+  }
+}
+
 // ================================================================
 // CLEAR TERMINAL READER
 // ================================================================
