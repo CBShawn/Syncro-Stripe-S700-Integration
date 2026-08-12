@@ -192,8 +192,8 @@ router.post(
 
         const readerId = metadata.stripe_reader_id;
 
-        // CRITICAL CHECK: Ignore online Checkout PaymentIntents here!
-        // Online email payments do not have stripe_reader_id and will be handled by checkout.session.completed.
+        // Ignore online Checkout PaymentIntents here.
+        // Online email payments do not have stripe_reader_id and are handled by checkout.session.completed.
         if (!readerId) {
           console.log(
             `ℹ️ PaymentIntent ${pi.id} has no stripe_reader_id - skipping terminal signature flow (handled by checkout session handler).`
@@ -323,9 +323,10 @@ router.post(
           ? String(metadata.syncro_invoice_id).trim()
           : null;
 
+        // Fallback to customer_id from metadata or default to "0" if missing
         const syncroCustomerId = metadata.syncro_customer_id
           ? String(metadata.syncro_customer_id).trim()
-          : null;
+          : "0";
 
         const amountString = (session.amount_total / 100).toFixed(2);
         const paymentIntentId = session.payment_intent
@@ -336,7 +337,7 @@ router.post(
           `💳 Checkout session completed for Syncro Invoice #${syncroInvoiceId} - Amount: $${amountString}`
         );
 
-        if (syncroInvoiceId && syncroCustomerId) {
+        if (syncroInvoiceId) {
           try {
             await recordSyncroPayment(
               syncroInvoiceId,
@@ -365,7 +366,7 @@ router.post(
           }
         } else {
           console.warn(
-            "⚠️ checkout.session.completed missing syncro_invoice_id or syncro_customer_id in metadata."
+            "⚠️ checkout.session.completed missing syncro_invoice_id in metadata."
           );
         }
       }
