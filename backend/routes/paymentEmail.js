@@ -11,7 +11,7 @@ const stripe = new Stripe(process.env.STRIPE_SECRET_KEY, {
   timeout: 10000, // 10s Stripe API timeout
 });
 
-// Configure Office 365 Nodemailer Transporter using OAuth2
+// Configure Office 365 Nodemailer Transporter using OAuth2 with explicit Tenant ID
 const transporter = nodemailer.createTransport({
   host: "smtp.office365.com",
   port: 587,
@@ -22,6 +22,7 @@ const transporter = nodemailer.createTransport({
     clientId: process.env.O365_CLIENT_ID,
     clientSecret: process.env.O365_CLIENT_SECRET,
     refreshToken: process.env.O365_REFRESH_TOKEN,
+    tenantId: process.env.O365_TENANT_ID || "5f5900bb-52f2-4650-91d3-b2981fc95d6f", // Critical: Forces local tenant authority
   },
   family: 4, // Force IPv4 to prevent Render ENETUNREACH issues
   tls: {
