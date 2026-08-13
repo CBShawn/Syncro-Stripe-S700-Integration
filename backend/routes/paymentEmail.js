@@ -13,7 +13,7 @@ const stripe = new Stripe(process.env.STRIPE_SECRET_KEY, {
   timeout: 10000, // 10s Stripe API timeout
 });
 
-// Configure Azure Application Authentication (No Refresh Token Needed!)
+// Configure Azure Application Authentication
 const credential = new ClientSecretCredential(
   process.env.O365_TENANT_ID,
   process.env.O365_CLIENT_ID,
@@ -31,7 +31,7 @@ const graphClient = Client.initWithMiddleware({
 });
 
 router.post("/send-payment-email", async (req, res) => {
-  console.log("➡️ [1/6] send-payment-email endpoint reached!");
+  console.log("➡️ [1/7] send-payment-email endpoint reached!");
 
   try {
     // 1. Auth check
@@ -42,7 +42,7 @@ router.post("/send-payment-email", async (req, res) => {
     }
 
     const { invoiceId, amount, customerId } = req.body || {};
-    console.log(`➡️ [2/6] Payload received - Invoice ID: ${invoiceId}, Amount: ${amount}`);
+    console.log(`➡️ [2/7] Payload received - Invoice ID: ${invoiceId}, Amount: ${amount}`);
 
     if (!invoiceId) {
       return res.status(400).json({ success: false, error: "Missing invoiceId." });
@@ -52,7 +52,7 @@ router.post("/send-payment-email", async (req, res) => {
     const syncroSubdomain = process.env.SYNCRO_SUBDOMAIN;
     const syncroApiKey = process.env.SYNCRO_API_KEY;
 
-    console.log(`➡️ [3/6] Fetching Syncro Invoice #${invoiceId}...`);
+    console.log(`➡️ [3/7] Fetching Syncro Invoice #${invoiceId}...`);
     const syncroRes = await axios.get(
       `https://${syncroSubdomain}.syncromsp.com/api/v1/invoices/${invoiceId}?api_key=${syncroApiKey}`,
       { timeout: 8000 }
@@ -71,9 +71,10 @@ router.post("/send-payment-email", async (req, res) => {
 
     // Resolve Email
     let customerEmail = invoice.customer_email || invoice.customer?.email;
-    if (!customerEmail && (customerId || invoice.customer_id)) {
+    let targetCustomerId = customerId || invoice.customer_id || invoice.customer?.id;
+
+    if (!customerEmail && targetCustomerId) {
       console.log("➡️ Email not in invoice, looking up customer record...");
-      const targetCustomerId = customerId || invoice.customer_id;
       try {
         const custRes = await axios.get(
           `https://${syncroSubdomain}.syncromsp.com/api/v1/customers/${targetCustomerId}?api_key=${syncroApiKey}`,
@@ -93,7 +94,7 @@ router.post("/send-payment-email", async (req, res) => {
     const amountInCents = Math.round((invoice.balance_due || amount) * 100);
 
     // 3. Stripe Checkout Session
-    console.log(`➡️ [4/6] Creating Stripe Checkout Session ($${(amountInCents/100).toFixed(2)})...`);
+    console.log(`➡️ [4/7] Creating Stripe Checkout Session ($${(amountInCents/100).toFixed(2)})...`);
     const session = await stripe.checkout.sessions.create({
       payment_method_types: ["card", "us_bank_account"],
       payment_method_options: {
@@ -118,15 +119,16 @@ router.post("/send-payment-email", async (req, res) => {
       customer_email: customerEmail,
       metadata: {
         syncro_invoice_id: String(invoice.id),
-        syncro_customer_id: String(customerId || invoice.customer_id || ""),
+        syncro_customer_id: String(targetCustomerId || ""),
       },
       success_url: `https://${syncroSubdomain}.syncromsp.com/invoices/${invoice.id}?payment=success`,
       cancel_url: `https://${syncroSubdomain}.syncromsp.com/invoices/${invoice.id}?payment=cancelled`,
     });
 
-    console.log(`➡️ [5/6] Stripe Session created: ${session.id}`);
+    console.log(`➡️ [5/7] Stripe Session created: ${session.id}`);
 
-    // 4. Send Email via Microsoft Graph API
+    // 4. Build Email Content
+    const emailSubject = `Payment Requested: Invoice #${invoice.number}`;
     const emailHtml = `
       <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 20px; border: 1px solid #e0e0e0; border-radius: 6px;">
         <h2 style="color: #333;">Payment Request for Invoice #${invoice.number}</h2>
@@ -142,16 +144,16 @@ router.post("/send-payment-email", async (req, res) => {
       </div>
     `;
 
-    console.log(`➡️ [6/6] Sending Email via Graph API to ${customerEmail}...`);
+    console.log(`➡️ [6/7] Sending Email via Graph API to ${customerEmail}...`);
     let emailSent = false;
     let emailError = null;
 
     try {
-      const senderEmail = process.env.O365_USER_EMAIL; // Sender address (e.g., shawn@codeblackit.com)
+      const senderEmail = process.env.O365_USER_EMAIL;
 
       const mailPayload = {
         message: {
-          subject: `Payment Requested: Invoice #${invoice.number}`,
+          subject: emailSubject,
           body: {
             contentType: "HTML",
             content: emailHtml,
@@ -173,6 +175,34 @@ router.post("/send-payment-email", async (req, res) => {
 
       console.log("✅ Email successfully sent via Microsoft Graph API!");
       emailSent = true;
+
+      // 5. Attach Communication Log to Syncro Invoice
+      console.log(`➡️ [7/7] Logging email communication to Syncro Invoice #${invoice.id}...`);
+      try {
+        const commPayload = {
+          communication: {
+            customer_id: parseInt(targetCustomerId, 10) || 0,
+            invoice_id: parseInt(invoice.id, 10),
+            recipient: customerEmail,
+            subject: emailSubject,
+            body: `Payment request email sent for $${(amountInCents / 100).toFixed(2)}.\nStripe Checkout Link: ${session.url}`,
+            media_type: "email",
+            type: "outbound_email",
+            created_at: new Date().toISOString(),
+          },
+        };
+
+        await axios.post(
+          `https://${syncroSubdomain}.syncromsp.com/api/v1/communications?api_key=${syncroApiKey}`,
+          commPayload,
+          { headers: { "Content-Type": "application/json" }, timeout: 8000 }
+        );
+
+        console.log(`✉️ Outbound email logged under Syncro Invoice #${invoice.id} communications!`);
+      } catch (commErr) {
+        console.warn("⚠️ Failed to attach communication record to Syncro:", commErr.response?.data || commErr.message);
+      }
+
     } catch (graphErr) {
       console.error("⚠️ Microsoft Graph API failed to send email:", graphErr.message);
       emailError = graphErr.message;
@@ -184,7 +214,7 @@ router.post("/send-payment-email", async (req, res) => {
       emailSent: emailSent,
       paymentUrl: session.url,
       message: emailSent
-        ? `Payment link generated and emailed to ${customerEmail}`
+        ? `Payment link generated, sent to ${customerEmail}, and logged in Syncro.`
         : `Payment link generated, but email failed: ${emailError}`,
     });
 
