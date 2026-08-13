@@ -69,7 +69,7 @@ router.post("/send-payment-email", async (req, res) => {
       return res.status(400).json({ success: false, error: "Invoice is already paid or has no balance due." });
     }
 
-    // Resolve Email
+    // Resolve Email & Customer ID
     let customerEmail = invoice.customer_email || invoice.customer?.email;
     let targetCustomerId = customerId || invoice.customer_id || invoice.customer?.id;
 
@@ -176,29 +176,32 @@ router.post("/send-payment-email", async (req, res) => {
       console.log("✅ Email successfully sent via Microsoft Graph API!");
       emailSent = true;
 
-      // 5. Attach Communication Log to Syncro Invoice
+      // 5. Attach Communication Log to Syncro Customer Sub-resource
       console.log(`➡️ [7/7] Logging email communication to Syncro Invoice #${invoice.id}...`);
       try {
-        const commPayload = {
-          communication: {
-            customer_id: parseInt(targetCustomerId, 10) || 0,
-            invoice_id: parseInt(invoice.id, 10),
-            recipient: customerEmail,
-            subject: emailSubject,
-            body: `Payment request email sent for $${(amountInCents / 100).toFixed(2)}.\nStripe Checkout Link: ${session.url}`,
-            media_type: "email",
-            type: "outbound_email",
-            created_at: new Date().toISOString(),
-          },
-        };
+        const cleanCustomerId = targetCustomerId || invoice.customer_id;
 
-        await axios.post(
-          `https://${syncroSubdomain}.syncromsp.com/api/v1/communications?api_key=${syncroApiKey}`,
-          commPayload,
-          { headers: { "Content-Type": "application/json" }, timeout: 8000 }
-        );
+        if (cleanCustomerId && String(cleanCustomerId) !== "0") {
+          const commPayload = {
+            communication: {
+              subject: emailSubject,
+              body: `Payment request email sent to ${customerEmail} for Invoice #${invoice.number} ($${(amountInCents / 100).toFixed(2)}).\nStripe Checkout Link: ${session.url}`,
+              medium: "Email",
+              direction: "outbound",
+              invoice_id: parseInt(invoice.id, 10),
+            },
+          };
 
-        console.log(`✉️ Outbound email logged under Syncro Invoice #${invoice.id} communications!`);
+          await axios.post(
+            `https://${syncroSubdomain}.syncromsp.com/api/v1/customers/${cleanCustomerId}/communications?api_key=${syncroApiKey}`,
+            commPayload,
+            { headers: { "Content-Type": "application/json" }, timeout: 8000 }
+          );
+
+          console.log(`✉️ Outbound email logged under Syncro Customer #${cleanCustomerId} for Invoice #${invoice.id}!`);
+        } else {
+          console.warn("⚠️ Cannot log communication: No valid customerId found on invoice.");
+        }
       } catch (commErr) {
         console.warn("⚠️ Failed to attach communication record to Syncro:", commErr.response?.data || commErr.message);
       }
