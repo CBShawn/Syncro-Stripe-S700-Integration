@@ -11,7 +11,10 @@ const PORT = process.env.PORT || 3000;
 const SYNCRO_SUBDOMAIN = process.env.SYNCRO_SUBDOMAIN;
 const SYNCRO_API_KEY = process.env.SYNCRO_API_KEY;
 
-// Helper to strip quotes, URL encoding (%22), and whitespace from file IDs
+/*
+// ================================================================
+// SANITIZE FILE ID (Commented Out - used for S700 signature files)
+// ================================================================
 function sanitizeFileId(fileId) {
   if (!fileId) return "";
   return String(fileId)
@@ -19,6 +22,7 @@ function sanitizeFileId(fileId) {
     .replace(/['"]+/g, "")
     .trim();
 }
+*/
 
 // ================================================================
 // CLEAR TERMINAL READER
@@ -47,11 +51,11 @@ async function recordSyncroPayment(
   syncroCustomerId,
   amountString,
   stripePaymentIntentId,
-  stripeInvoiceId = null,
-  signatureFileId = null
+  stripeInvoiceId = null
+  /*, signatureFileId = null*/
 ) {
   const cleanInvoiceId = String(syncroInvoiceId || "").trim();
-  const cleanSigFileId = sanitizeFileId(signatureFileId);
+  // const cleanSigFileId = sanitizeFileId(signatureFileId);
 
   if (!cleanInvoiceId) {
     console.error("❌ recordSyncroPayment called with missing syncroInvoiceId");
@@ -123,18 +127,24 @@ async function recordSyncroPayment(
       process.env.BASE_URL ||
       `http://localhost:${PORT}`;
 
+    /*
+    // ============================================================
+    // S700 SIGNATURE URL GENERATION (Commented Out)
+    // ============================================================
     const signatureUrl = cleanSigFileId
       ? `${baseUrl}/api/signature/${encodeURIComponent(cleanSigFileId)}`
       : "";
 
     const sigTag = cleanSigFileId ? ` | Sig: ${signatureUrl}` : "";
-    const referenceString = `${stripeInvoiceId || stripePaymentIntentId || "Stripe_Payment"}${sigTag}`;
+    */
+
+    const referenceString = `${stripeInvoiceId || stripePaymentIntentId || "Stripe_Payment"}`;
 
     // ============================================================
     // 3. BUILD NOTES
     // ============================================================
     const notesstring = [
-      cleanSigFileId ? `Stripe Terminal Payment` : `Stripe Online Payment`,
+      `Stripe Terminal Payment`,
       `PaymentIntent: ${stripePaymentIntentId || "N/A"}`,
       `Charge: ${stripePayment?.latest_charge || "N/A"}`,
       `Card: ${cardInfo.description || cardInfo.brand || "N/A"}`,
@@ -152,8 +162,10 @@ async function recordSyncroPayment(
       `Currency: ${stripePayment?.currency || "usd"}`,
       `Amount: ${stripePayment?.amount ?? totalCents}`,
       `Amount Received: ${stripePayment?.amount_received ?? totalCents}`,
+      /*
       `Signature File: ${cleanSigFileId || "N/A"}`,
       `Signature URL: ${signatureUrl || "N/A"}`,
+      */
     ].join(" | ");
 
     // ============================================================
@@ -177,7 +189,7 @@ async function recordSyncroPayment(
       .substring(0, 255);
 
     // ============================================================
-    // 5. CLEAN SYNCRO PAYMENT PAYLOAD (NO INVALID DUMMY STRINGS)
+    // 5. CLEAN SYNCRO PAYMENT PAYLOAD
     // ============================================================
     const payload = {
       payment: {
@@ -185,9 +197,7 @@ async function recordSyncroPayment(
         invoice_id: parsedInvoiceId,
         amount: amountFloat,
         amount_cents: totalCents,
-        payment_method: cleanSigFileId
-          ? "Stripe Terminal (Signed in Stripe)"
-          : "Stripe Online",
+        payment_method: "Stripe Terminal",
         ref_num: referenceString,
         notes: notesstring,
         transaction_response: transactionresponse,
