@@ -176,13 +176,12 @@ router.post("/send-payment-email", async (req, res) => {
       console.log("✅ Email successfully sent via Microsoft Graph API!");
       emailSent = true;
 
-      // 5. Attach Log Record via Syncro's valid Comments / Ticket endpoint
-      console.log(`➡️ [7/7] Logging email communication in Syncro...`);
-      try {
-        const emailLogBody = `✉️ Payment request email sent to ${customerEmail} for Invoice #${invoice.number} ($${(amountInCents / 100).toFixed(2)}).\nStripe Link: ${session.url}`;
+      // 5. Attach Communication Record (Only if tied to a Syncro Ticket)
+      console.log(`➡️ [7/7] Checking Syncro communication logging...`);
+      if (invoice.ticket_id) {
+        try {
+          const emailLogBody = `✉️ Payment request email sent to ${customerEmail} for Invoice #${invoice.number} ($${(amountInCents / 100).toFixed(2)}).\nStripe Link: ${session.url}`;
 
-        if (invoice.ticket_id) {
-          // A. If tied to a ticket, log directly to Ticket Communications Log
           await axios.post(
             `https://${syncroSubdomain}.syncromsp.com/api/v1/tickets/${invoice.ticket_id}/comment?api_key=${syncroApiKey}`,
             {
@@ -194,22 +193,11 @@ router.post("/send-payment-email", async (req, res) => {
             { headers: { "Content-Type": "application/json" }, timeout: 8000 }
           );
           console.log(`✉️ Email log attached to Ticket #${invoice.ticket_id} communications!`);
-        } else {
-          // B. Otherwise, post as an Invoice Comment
-          await axios.post(
-            `https://${syncroSubdomain}.syncromsp.com/api/v1/invoices/${invoice.id}/comments?api_key=${syncroApiKey}`,
-            {
-              comment: {
-                subject: emailSubject,
-                body: emailLogBody,
-              },
-            },
-            { headers: { "Content-Type": "application/json" }, timeout: 8000 }
-          );
-          console.log(`✉️ Email log attached to Invoice #${invoice.id} comments!`);
+        } catch (commErr) {
+          console.warn("⚠️ Failed to attach comment to Syncro ticket:", commErr.response?.data || commErr.message);
         }
-      } catch (commErr) {
-        console.warn("⚠️ Syncro log attachment notice:", commErr.response?.data || commErr.message);
+      } else {
+        console.log(`ℹ️ Invoice #${invoice.id} is standalone (no ticket_id). Skipping Syncro API log call to avoid 404.`);
       }
 
     } catch (graphErr) {
@@ -223,7 +211,7 @@ router.post("/send-payment-email", async (req, res) => {
       emailSent: emailSent,
       paymentUrl: session.url,
       message: emailSent
-        ? `Payment link generated, sent to ${customerEmail}, and logged in Syncro.`
+        ? `Payment link generated, sent to ${customerEmail}, and logged.`
         : `Payment link generated, but email failed: ${emailError}`,
     });
 
