@@ -100,7 +100,7 @@ router.post("/pay-and-sign", async (req, res) => {
     const feeSaverCents = parseInt(feeSaverAmount, 10) || 0;
     const totalChargeCents = amountCents + feeSaverCents;
 
-    console.log(`▶ Initiating Pre-Dip Cart Display for Invoice #${syncroInvoiceId} ($${(totalChargeCents / 100).toFixed(2)}) on Reader: ${readerId}`);
+    console.log(`▶ Initiating Terminal Payment for Invoice #${syncroInvoiceId} ($${(totalChargeCents / 100).toFixed(2)}) on Reader: ${readerId}`);
 
     const safeSyncroCustomerId = (syncroCustomerId && syncroCustomerId !== "undefined") 
       ? String(syncroCustomerId).trim() 
@@ -156,10 +156,15 @@ router.post("/pay-and-sign", async (req, res) => {
       },
     });
 
-    // Store PaymentIntent ID mapped to reader for pre-dip card trigger
-    activeReaderIntents.set(String(readerId), paymentIntent.id);
+    /*
+    // ============================================================
+    // PRE-DIP ACTIVE READER INTENT MAPPING (Commented Out)
+    // Uncomment if returning to instant native pre-dip listeners.
+    // ============================================================
+    // activeReaderIntents.set(String(readerId), paymentIntent.id);
+    */
 
-    // Display Cart items on Reader screen
+    // 1. Display Cart items on Reader screen
     await setTerminalReaderDisplay(
       readerId,
       lineItems,
@@ -167,10 +172,17 @@ router.post("/pay-and-sign", async (req, res) => {
       feeSaverCents
     );
 
-    // Brief delay to allow customer cart review before opening payment reader
-    await new Promise((resolve) => setTimeout(resolve, 3000));
+    // ============================================================
+    // FIX: 3.5-SECOND DISPLAY HOLD DELAY
+    // Gives the S700 screen time to hold line items before card prompt
+    // ============================================================
+    /*
+    // Original instant transition (commented out):
+    // await new Promise((resolve) => setTimeout(resolve, 3000));
+    */
+    await new Promise((resolve) => setTimeout(resolve, 3500));
 
-    // Start payment collection directly (S700 automatically updates display)
+    // 2. Trigger card prompt directly on S700
     const processPayload = new URLSearchParams();
     processPayload.append("payment_intent", paymentIntent.id);
 
@@ -185,7 +197,7 @@ router.post("/pay-and-sign", async (req, res) => {
       }
     );
 
-    console.log(`✅ Cart display and pre-dip payment intent (${paymentIntent.id}) active on Reader ${readerId}`);
+    console.log(`✅ Sent PaymentIntent (${paymentIntent.id}) to Terminal Reader ${readerId}`);
 
     return res.json({
       success: true,
