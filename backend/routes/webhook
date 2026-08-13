@@ -51,8 +51,12 @@ router.post(
 
     try {
       // ================================================================
-      // 1. TERMINAL READER ACTION SUCCEEDED
+      // 1. TERMINAL READER ACTION SUCCEEDED (S700 SIGNATURE HANDLING)
       // ================================================================
+      /* 
+      // COMMENTED OUT: Handled by Topaz natively in Syncro. 
+      // Uncomment if returning to S700 on-terminal signature collection.
+
       if (event.type === "terminal.reader.action_succeeded") {
         const readerObj = event.data.object;
         const readerId = String(readerObj.id);
@@ -72,9 +76,6 @@ router.post(
 
         console.log(`📋 Reader action type: ${actionType}`);
 
-        // ==============================================================
-        // CASE A: Signature was collected on Terminal
-        // ==============================================================
         if (actionType === "collect_inputs") {
           const metadata =
             action.collect_inputs?.metadata ||
@@ -182,6 +183,7 @@ router.post(
           );
         }
       }
+      */
 
       // ================================================================
       // 2. PAYMENT SUCCEEDED (TERMINAL ONLY)
@@ -193,10 +195,9 @@ router.post(
         const readerId = metadata.stripe_reader_id;
 
         // Ignore online Checkout PaymentIntents here.
-        // Online email payments do not have stripe_reader_id and are handled by checkout.session.completed.
         if (!readerId) {
           console.log(
-            `ℹ️ PaymentIntent ${pi.id} has no stripe_reader_id - skipping terminal signature flow (handled by checkout session handler).`
+            `ℹ️ PaymentIntent ${pi.id} has no stripe_reader_id - skipping terminal flow.`
           );
         } else {
           const syncroInvoiceId = metadata.syncro_invoice_id
@@ -209,13 +210,34 @@ router.post(
 
           const amountString = (pi.amount / 100).toFixed(2);
 
-          if (syncroInvoiceId) {
+          // RECORD PAYMENT IMMEDIATELY IN SYNCRO (No S700 signature wait)
+          if (syncroInvoiceId && syncroCustomerId) {
+            await recordSyncroPayment(
+              syncroInvoiceId,
+              syncroCustomerId,
+              amountString,
+              pi.id,
+              null,
+              null
+            );
+
             invoicePaymentStatus.set(syncroInvoiceId, {
-              status: "awaiting_signature",
+              status: "paid",
               amount: amountString,
             });
+
+            await clearTerminalReaderDisplay(readerId);
+            invoiceCustomerCache.delete(syncroInvoiceId);
+
+            console.log(
+              `✅ Directly posted Terminal Payment ($${amountString}) to Syncro Invoice #${syncroInvoiceId}`
+            );
           }
 
+          /*
+          // ============================================================
+          // S700 SIGNATURE COLLECTION TRIGGER (Commented Out)
+          // ============================================================
           if (syncroInvoiceId && syncroCustomerId) {
             pendingSyncroPayments.set(String(pi.id), {
               syncroInvoiceId,
@@ -309,6 +331,7 @@ router.post(
               sigErr.response?.data || sigErr.message
             );
           }
+          */
         }
       }
 
@@ -323,7 +346,6 @@ router.post(
           ? String(metadata.syncro_invoice_id).trim()
           : null;
 
-        // Fallback to customer_id from metadata or default to "0" if missing
         const syncroCustomerId = metadata.syncro_customer_id
           ? String(metadata.syncro_customer_id).trim()
           : "0";
