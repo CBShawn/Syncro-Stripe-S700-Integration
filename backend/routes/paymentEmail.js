@@ -176,47 +176,40 @@ router.post("/send-payment-email", async (req, res) => {
       console.log("✅ Email successfully sent via Microsoft Graph API!");
       emailSent = true;
 
-      // 5. Attach Log Record to Syncro Ticket Communications or Customer Notes
+      // 5. Attach Log Record via Syncro's valid Comments / Ticket endpoint
       console.log(`➡️ [7/7] Logging email communication in Syncro...`);
       try {
-        const emailLogBody = `✉️ Payment request email sent to ${customerEmail} for Invoice #${invoice.number} ($${(amountInCents / 100).toFixed(2)}).\nStripe Checkout Link: ${session.url}`;
+        const emailLogBody = `✉️ Payment request email sent to ${customerEmail} for Invoice #${invoice.number} ($${(amountInCents / 100).toFixed(2)}).\nStripe Link: ${session.url}`;
 
         if (invoice.ticket_id) {
-          // A. Log to Ticket Communications Log
-          const commentPayload = {
-            body: emailLogBody,
-            subject: emailSubject,
-            do_not_email: "1",
-            hidden: "0",
-          };
-
+          // A. If tied to a ticket, log directly to Ticket Communications Log
           await axios.post(
             `https://${syncroSubdomain}.syncromsp.com/api/v1/tickets/${invoice.ticket_id}/comment?api_key=${syncroApiKey}`,
-            commentPayload,
-            { headers: { "Content-Type": "application/json" }, timeout: 8000 }
-          );
-
-          console.log(`✉️ Email communication logged to Ticket #${invoice.ticket_id}!`);
-        } else if (targetCustomerId && String(targetCustomerId) !== "0") {
-          // B. Log to Customer Notes/Communication Feed
-          const customerNotePayload = {
-            note: {
-              note: emailLogBody,
+            {
+              subject: emailSubject,
+              body: emailLogBody,
+              do_not_email: "1",
+              hidden: "0",
             },
-          };
-
-          await axios.post(
-            `https://${syncroSubdomain}.syncromsp.com/api/v1/customers/${targetCustomerId}/notes?api_key=${syncroApiKey}`,
-            customerNotePayload,
             { headers: { "Content-Type": "application/json" }, timeout: 8000 }
           );
-
-          console.log(`✉️ Email log saved under Customer #${targetCustomerId} notes!`);
+          console.log(`✉️ Email log attached to Ticket #${invoice.ticket_id} communications!`);
         } else {
-          console.warn("⚠️ No ticket_id or customer_id available to log communication.");
+          // B. Otherwise, post as an Invoice Comment
+          await axios.post(
+            `https://${syncroSubdomain}.syncromsp.com/api/v1/invoices/${invoice.id}/comments?api_key=${syncroApiKey}`,
+            {
+              comment: {
+                subject: emailSubject,
+                body: emailLogBody,
+              },
+            },
+            { headers: { "Content-Type": "application/json" }, timeout: 8000 }
+          );
+          console.log(`✉️ Email log attached to Invoice #${invoice.id} comments!`);
         }
       } catch (commErr) {
-        console.warn("⚠️ Failed to attach communication record to Syncro:", commErr.response?.data || commErr.message);
+        console.warn("⚠️ Syncro log attachment notice:", commErr.response?.data || commErr.message);
       }
 
     } catch (graphErr) {
