@@ -144,13 +144,23 @@ router.post("/send-payment-email", async (req, res) => {
       </div>
     `;
 
-    console.log(`➡️ [6/7] Sending Email via Graph API to ${customerEmail}...`);
+    // 5. Build BCC list (Personal mailbox + Syncro Inbound Email)
+    const senderEmail = process.env.O365_USER_EMAIL;
+    const syncroInboundEmail = process.env.SYNCRO_INBOUND_EMAIL;
+
+    const bccList = [];
+    if (senderEmail) {
+      bccList.push({ emailAddress: { address: senderEmail } });
+    }
+    if (syncroInboundEmail) {
+      bccList.push({ emailAddress: { address: syncroInboundEmail } });
+    }
+
+    console.log(`➡️ [6/7] Sending Email via Graph API to ${customerEmail} (BCC Count: ${bccList.length})...`);
     let emailSent = false;
     let emailError = null;
 
     try {
-      const senderEmail = process.env.O365_USER_EMAIL;
-
       const mailPayload = {
         message: {
           subject: emailSubject,
@@ -165,14 +175,7 @@ router.post("/send-payment-email", async (req, res) => {
               },
             },
           ],
-          // BCC added here to copy your O365 address
-          bccRecipients: [
-            {
-              emailAddress: {
-                address: senderEmail,
-              },
-            },
-          ],
+          bccRecipients: bccList,
         },
         saveToSentItems: true,
       };
@@ -181,10 +184,10 @@ router.post("/send-payment-email", async (req, res) => {
         .api(`/users/${senderEmail}/sendMail`)
         .post(mailPayload);
 
-      console.log(`✅ Email successfully sent via Microsoft Graph API (Customer + BCC: ${senderEmail})!`);
+      console.log("✅ Email successfully sent via Microsoft Graph API (Customer + BCC Inbound Delivered)!");
       emailSent = true;
 
-      // 5. Attach Communication Record (Only if tied to a Syncro Ticket)
+      // 6. Attach Communication Record (Only if tied to a Syncro Ticket)
       console.log(`➡️ [7/7] Checking Syncro communication logging...`);
       if (invoice.ticket_id) {
         try {
@@ -205,7 +208,7 @@ router.post("/send-payment-email", async (req, res) => {
           console.warn("⚠️ Failed to attach comment to Syncro ticket:", commErr.response?.data || commErr.message);
         }
       } else {
-        console.log(`ℹ️ Invoice #${invoice.id} is standalone (no ticket_id). Skipping Syncro API log call to avoid 404.`);
+        console.log(`ℹ️ Invoice #${invoice.id} is standalone (no ticket_id). Relying on BCC to Syncro Inbound Email.`);
       }
 
     } catch (graphErr) {
@@ -219,7 +222,7 @@ router.post("/send-payment-email", async (req, res) => {
       emailSent: emailSent,
       paymentUrl: session.url,
       message: emailSent
-        ? `Payment link generated, sent to ${customerEmail} (BCC: ${process.env.O365_USER_EMAIL}), and logged.`
+        ? `Payment link generated, sent to ${customerEmail}, and BCC'd to Syncro inbound.`
         : `Payment link generated, but email failed: ${emailError}`,
     });
 
