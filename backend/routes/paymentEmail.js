@@ -165,6 +165,14 @@ router.post("/send-payment-email", async (req, res) => {
               },
             },
           ],
+          // BCC added here to copy your O365 address
+          bccRecipients: [
+            {
+              emailAddress: {
+                address: senderEmail,
+              },
+            },
+          ],
         },
         saveToSentItems: true,
       };
@@ -173,7 +181,7 @@ router.post("/send-payment-email", async (req, res) => {
         .api(`/users/${senderEmail}/sendMail`)
         .post(mailPayload);
 
-      console.log("✅ Email successfully sent via Microsoft Graph API!");
+      console.log(`✅ Email successfully sent via Microsoft Graph API (Customer + BCC: ${senderEmail})!`);
       emailSent = true;
 
       // 5. Attach Communication Record (Only if tied to a Syncro Ticket)
@@ -211,7 +219,7 @@ router.post("/send-payment-email", async (req, res) => {
       emailSent: emailSent,
       paymentUrl: session.url,
       message: emailSent
-        ? `Payment link generated, sent to ${customerEmail}, and logged.`
+        ? `Payment link generated, sent to ${customerEmail} (BCC: ${process.env.O365_USER_EMAIL}), and logged.`
         : `Payment link generated, but email failed: ${emailError}`,
     });
 
