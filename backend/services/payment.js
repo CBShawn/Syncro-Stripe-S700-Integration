@@ -11,19 +11,6 @@ const PORT = process.env.PORT || 3000;
 const SYNCRO_SUBDOMAIN = process.env.SYNCRO_SUBDOMAIN;
 const SYNCRO_API_KEY = process.env.SYNCRO_API_KEY;
 
-/*
-// ================================================================
-// SANITIZE FILE ID (Commented Out - used for S700 signature files)
-// ================================================================
-function sanitizeFileId(fileId) {
-  if (!fileId) return "";
-  return String(fileId)
-    .replace(/%22/gi, "")
-    .replace(/['"]+/g, "")
-    .trim();
-}
-*/
-
 // ================================================================
 // CLEAR TERMINAL READER
 // ================================================================
@@ -52,10 +39,8 @@ async function recordSyncroPayment(
   amountString,
   stripePaymentIntentId,
   stripeInvoiceId = null
-  /*, signatureFileId = null*/
 ) {
   const cleanInvoiceId = String(syncroInvoiceId || "").trim();
-  // const cleanSigFileId = sanitizeFileId(signatureFileId);
 
   if (!cleanInvoiceId) {
     console.error("❌ recordSyncroPayment called with missing syncroInvoiceId");
@@ -122,23 +107,9 @@ async function recordSyncroPayment(
     const cardDetails = stripePayment?.payment_method?.card || {};
     const cardInfo = cardPresent.brand ? cardPresent : cardDetails;
 
-    const baseUrl =
-      process.env.RENDER_EXTERNAL_URL ||
-      process.env.BASE_URL ||
-      `http://localhost:${PORT}`;
-
-    /*
-    // ============================================================
-    // S700 SIGNATURE URL GENERATION (Commented Out)
-    // ============================================================
-    const signatureUrl = cleanSigFileId
-      ? `${baseUrl}/api/signature/${encodeURIComponent(cleanSigFileId)}`
-      : "";
-
-    const sigTag = cleanSigFileId ? ` | Sig: ${signatureUrl}` : "";
-    */
-
     const referenceString = `${stripeInvoiceId || stripePaymentIntentId || "Stripe_Payment"}`;
+    const nowIso = new Date().toISOString();
+    const todayDate = nowIso.split("T")[0];
 
     // ============================================================
     // 3. BUILD NOTES
@@ -162,10 +133,6 @@ async function recordSyncroPayment(
       `Currency: ${stripePayment?.currency || "usd"}`,
       `Amount: ${stripePayment?.amount ?? totalCents}`,
       `Amount Received: ${stripePayment?.amount_received ?? totalCents}`,
-      /*
-      `Signature File: ${cleanSigFileId || "N/A"}`,
-      `Signature URL: ${signatureUrl || "N/A"}`,
-      */
     ].join(" | ");
 
     // ============================================================
@@ -189,7 +156,7 @@ async function recordSyncroPayment(
       .substring(0, 255);
 
     // ============================================================
-    // 5. CLEAN SYNCRO PAYMENT PAYLOAD
+    // 5. CLEAN SYNCRO PAYMENT PAYLOAD WITH SIGNATURE_DATE
     // ============================================================
     const payload = {
       payment: {
@@ -199,6 +166,8 @@ async function recordSyncroPayment(
         amount_cents: totalCents,
         payment_method: "Stripe Terminal",
         ref_num: referenceString,
+        applied_at: todayDate,
+        signature_date: nowIso, // Populates Syncro's signature verification timestamp
         notes: notesstring,
         transaction_response: transactionresponse,
         address_state: customerData.state || "",
