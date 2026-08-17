@@ -16,6 +16,34 @@ const {
   activeReaderIntents
 } = require("../services/cache");
 
+// =========================================================================
+// 1. PAYMENT STATUS POLLING ROUTE (RETURNS PAYMENT ID FOR RECEIPT REDIRECT)
+// =========================================================================
+router.get("/payment-status/:invoiceId", (req, res) => {
+  const invoiceId = String(req.params.invoiceId || "").trim();
+  const record = invoicePaymentStatus.get(invoiceId);
+
+  console.log("🔎 PAYMENT STATUS CHECK:", {
+    invoice: invoiceId,
+    record: record,
+    processed: Array.from(processedSyncroPayments || []),
+  });
+
+  if (!record) {
+    return res.json({ status: "pending" });
+  }
+
+  return res.json({
+    status: record.status || "paid",
+    amount: record.amount,
+    paymentId: record.paymentId || null, // <--- Returns Syncro Payment ID to Chrome Extension
+    stage: record.stage || null,
+  });
+});
+
+// =========================================================================
+// 2. PAY AND SIGN ROUTE
+// =========================================================================
 router.post("/pay-and-sign", async (req, res) => {
   try {
     console.log("📥 RAW INCOMING BODY:", JSON.stringify(req.body, null, 2));
@@ -156,14 +184,6 @@ router.post("/pay-and-sign", async (req, res) => {
       },
     });
 
-    /*
-    // ============================================================
-    // PRE-DIP ACTIVE READER INTENT MAPPING (Commented Out)
-    // Uncomment if returning to instant native pre-dip listeners.
-    // ============================================================
-    // activeReaderIntents.set(String(readerId), paymentIntent.id);
-    */
-
     // 1. Display Cart items on Reader screen
     await setTerminalReaderDisplay(
       readerId,
@@ -172,14 +192,6 @@ router.post("/pay-and-sign", async (req, res) => {
       feeSaverCents
     );
 
-    // ============================================================
-    // FIX: 3.5-SECOND DISPLAY HOLD DELAY
-    // Gives the S700 screen time to hold line items before card prompt
-    // ============================================================
-    /*
-    // Original instant transition (commented out):
-    // await new Promise((resolve) => setTimeout(resolve, 3000));
-    */
     await new Promise((resolve) => setTimeout(resolve, 3500));
 
     // 2. Trigger card prompt directly on S700
