@@ -221,11 +221,6 @@ router.post(
               null
             );
 
-            invoicePaymentStatus.set(syncroInvoiceId, {
-              status: "paid",
-              amount: amountString,
-            });
-
             await clearTerminalReaderDisplay(readerId);
             invoiceCustomerCache.delete(syncroInvoiceId);
 
@@ -369,11 +364,6 @@ router.post(
               null,
               null
             );
-
-            invoicePaymentStatus.set(syncroInvoiceId, {
-              status: "paid",
-              amount: amountString,
-            });
 
             invoiceCustomerCache.delete(syncroInvoiceId);
 
