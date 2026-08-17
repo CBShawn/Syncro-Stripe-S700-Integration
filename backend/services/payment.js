@@ -167,7 +167,7 @@ async function recordSyncroPayment(
         payment_method: "Stripe Terminal",
         ref_num: referenceString,
         applied_at: todayDate,
-        signature_date: nowIso, // Populates Syncro's signature verification timestamp
+        signature_date: nowIso,
         notes: notesstring,
         transaction_response: transactionresponse,
         address_state: customerData.state || "",
@@ -202,6 +202,8 @@ async function recordSyncroPayment(
     console.log("===== SYNCRO PAYMENT CREATED =====");
     console.log(JSON.stringify(syncroResponse.data, null, 2));
 
+    const createdPaymentId = syncroResponse.data?.payment?.id;
+
     processedSyncroPayments.add(syncroKey);
 
     // ============================================================
@@ -222,16 +224,17 @@ async function recordSyncroPayment(
     }
 
     // ============================================================
-    // UPDATE STATUS CACHE
+    // UPDATE STATUS CACHE WITH PAYMENT ID
     // ============================================================
     invoicePaymentStatus.set(cleanInvoiceId, {
       status: "paid",
       stage: null,
       amount: amountString,
+      paymentId: createdPaymentId || null,
       stripe_invoice_id: stripeInvoiceId || "",
     });
 
-    console.log(`✅ Syncro Invoice #${cleanInvoiceId} marked PAID ($${amountString}).`);
+    console.log(`✅ Syncro Invoice #${cleanInvoiceId} marked PAID ($${amountString}) with Payment ID ${createdPaymentId}.`);
 
   } catch (err) {
     processedSyncroPayments.delete(syncroKey);
