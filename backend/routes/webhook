@@ -1,3 +1,4 @@
+// routes/webhook.js
 const express = require("express");
 const axios = require("axios");
 const Stripe = require("stripe");
@@ -51,142 +52,7 @@ router.post(
 
     try {
       // ================================================================
-      // 1. TERMINAL READER ACTION SUCCEEDED (S700 SIGNATURE HANDLING)
-      // ================================================================
-      /* 
-      // COMMENTED OUT: Handled by Topaz natively in Syncro. 
-      // Uncomment if returning to S700 on-terminal signature collection.
-
-      if (event.type === "terminal.reader.action_succeeded") {
-        const readerObj = event.data.object;
-        const readerId = String(readerObj.id);
-        const action = readerObj.action || {};
-
-        console.log(
-          "===== COLLECT INPUTS ACTION DEBUG =====",
-          JSON.stringify(action, null, 2)
-        );
-
-        console.log(
-          "===== READER METADATA DEBUG =====",
-          JSON.stringify(readerObj.metadata || {}, null, 2)
-        );
-
-        const actionType = action.type;
-
-        console.log(`📋 Reader action type: ${actionType}`);
-
-        if (actionType === "collect_inputs") {
-          const metadata =
-            action.collect_inputs?.metadata ||
-            readerObj.metadata ||
-            {};
-
-          const paymentIntentId = metadata.payment_intent_id;
-
-          let fileId = null;
-
-          const collectInputs =
-            action.collect_inputs?.inputs ||
-            action.process_input?.inputs ||
-            [];
-
-          for (const input of collectInputs) {
-            if (input.type === "signature") {
-              fileId =
-                input.signature?.value ||
-                input.value ||
-                input.signature;
-
-              if (fileId) break;
-            }
-          }
-
-          if (!fileId && readerObj.action?.collect_inputs) {
-            fileId = readerObj.action.collect_inputs.value;
-          }
-
-          console.log(
-            `📋 Signature PaymentIntent ID: ${paymentIntentId || "NONE"}`
-          );
-          console.log(
-            `📋 Signature File ID: ${fileId || "NONE"}`
-          );
-
-          if (paymentIntentId) {
-            if (fileId) {
-              try {
-                await stripe.paymentIntents.update(paymentIntentId, {
-                  metadata: {
-                    stripe_signature_file_id: String(fileId),
-                    signed_at: new Date().toISOString(),
-                  },
-                });
-
-                console.log(
-                  `✅ Saved Signature File ID (${fileId}) to PaymentIntent metadata for ${paymentIntentId}`
-                );
-              } catch (updateErr) {
-                console.error(
-                  "⚠️ Failed to update PaymentIntent metadata with signature ID:",
-                  updateErr.message
-                );
-              }
-            }
-
-            const pending = pendingSyncroPayments.get(
-              String(paymentIntentId)
-            );
-
-            if (pending) {
-              pendingSyncroPayments.delete(
-                String(paymentIntentId)
-              );
-
-              await recordSyncroPayment(
-                pending.syncroInvoiceId,
-                pending.syncroCustomerId,
-                pending.amountString,
-                pending.paymentIntentId,
-                null,
-                fileId
-              );
-
-              await clearTerminalReaderDisplay(
-                pending.readerId || readerObj.id
-              );
-
-              invoiceCustomerCache.delete(
-                String(pending.syncroInvoiceId)
-              );
-            } else {
-              console.warn(
-                `⚠️ No pending Syncro payment found for PaymentIntent ${paymentIntentId}`
-              );
-            }
-          } else {
-            console.warn(
-              "⚠️ collect_inputs succeeded but no payment_intent_id was found in reader metadata."
-            );
-          }
-        }
-
-        else if (actionType === "process_payment_intent") {
-          console.log(
-            `ℹ️ Payment processing completed on Reader ${readerId}`
-          );
-        }
-
-        else {
-          console.log(
-            `ℹ️ Unhandled reader action type: ${actionType}`
-          );
-        }
-      }
-      */
-
-      // ================================================================
-      // 2. PAYMENT SUCCEEDED (TERMINAL ONLY)
+      // 1. PAYMENT SUCCEEDED (TERMINAL ONLY)
       // ================================================================
       if (event.type === "payment_intent.succeeded") {
         const pi = event.data.object;
@@ -194,7 +60,6 @@ router.post(
 
         const readerId = metadata.stripe_reader_id;
 
-        // Ignore online Checkout PaymentIntents here.
         if (!readerId) {
           console.log(
             `ℹ️ PaymentIntent ${pi.id} has no stripe_reader_id - skipping terminal flow.`
@@ -210,7 +75,6 @@ router.post(
 
           const amountString = (pi.amount / 100).toFixed(2);
 
-          // RECORD PAYMENT IMMEDIATELY IN SYNCRO (No S700 signature wait)
           if (syncroInvoiceId && syncroCustomerId) {
             await recordSyncroPayment(
               syncroInvoiceId,
@@ -228,110 +92,11 @@ router.post(
               `✅ Directly posted Terminal Payment ($${amountString}) to Syncro Invoice #${syncroInvoiceId}`
             );
           }
-
-          /*
-          // ============================================================
-          // S700 SIGNATURE COLLECTION TRIGGER (Commented Out)
-          // ============================================================
-          if (syncroInvoiceId && syncroCustomerId) {
-            pendingSyncroPayments.set(String(pi.id), {
-              syncroInvoiceId,
-              syncroCustomerId,
-              amountString,
-              paymentIntentId: pi.id,
-              readerId,
-            });
-
-            console.log(
-              `✅ Pending Terminal Syncro payment stored for PaymentIntent ${pi.id}`
-            );
-
-            // Timeout fallback
-            setTimeout(async () => {
-              const pending = pendingSyncroPayments.get(
-                String(pi.id)
-              );
-
-              if (pending) {
-                pendingSyncroPayments.delete(
-                  String(pi.id)
-                );
-
-                console.log(
-                  `⏱️ Signature wait timed out for PaymentIntent ${pi.id}. Recording payment without signature link.`
-                );
-
-                await recordSyncroPayment(
-                  pending.syncroInvoiceId,
-                  pending.syncroCustomerId,
-                  pending.amountString,
-                  pending.paymentIntentId,
-                  null,
-                  null
-                );
-
-                await clearTerminalReaderDisplay(
-                  pending.readerId
-                );
-
-                invoiceCustomerCache.delete(
-                  String(pending.syncroInvoiceId)
-                );
-              }
-            }, 25000);
-          }
-
-          // Trigger signature collection on S700 Terminal
-          try {
-            const signaturePayload = new URLSearchParams();
-
-            signaturePayload.append("inputs[0][type]", "signature");
-            signaturePayload.append("inputs[0][required]", "true");
-            signaturePayload.append(
-              "inputs[0][custom_text][title]",
-              "Equipment Return & Work Acceptance"
-            );
-            signaturePayload.append(
-              "inputs[0][custom_text][description]",
-              `I accept the completed work and charges. Syncro Invoice #${
-                syncroInvoiceId || ""
-              }.`
-            );
-            signaturePayload.append(
-              "inputs[0][custom_text][submit_button]",
-              "Accept & Sign"
-            );
-            signaturePayload.append(
-              "metadata[payment_intent_id]",
-              pi.id
-            );
-
-            await axios.post(
-              `https://api.stripe.com/v1/terminal/readers/${readerId}/collect_inputs`,
-              signaturePayload.toString(),
-              {
-                headers: {
-                  Authorization: `Bearer ${process.env.STRIPE_SECRET_KEY}`,
-                  "Content-Type": "application/x-www-form-urlencoded",
-                },
-              }
-            );
-
-            console.log(
-              `✅ Signature collection triggered for PaymentIntent ${pi.id}`
-            );
-          } catch (sigErr) {
-            console.error(
-              "❌ Failed to trigger signature collection:",
-              sigErr.response?.data || sigErr.message
-            );
-          }
-          */
         }
       }
 
       // ================================================================
-      // 3. CHECKOUT SESSION COMPLETED (ONLINE EMAIL PAYMENTS - ACH & CARD)
+      // 2. CHECKOUT SESSION COMPLETED (ONLINE EMAIL PAYMENTS - ACH & CARD)
       // ================================================================
       if (event.type === "checkout.session.completed") {
         const session = event.data.object;
@@ -343,7 +108,7 @@ router.post(
 
         const syncroCustomerId = metadata.syncro_customer_id
           ? String(metadata.syncro_customer_id).trim()
-          : "0";
+          : null;
 
         const amountString = (session.amount_total / 100).toFixed(2);
         const paymentIntentId = session.payment_intent
@@ -354,7 +119,7 @@ router.post(
           `💳 Checkout session completed for Syncro Invoice #${syncroInvoiceId} - Amount: $${amountString}`
         );
 
-        if (syncroInvoiceId) {
+        if (syncroInvoiceId && syncroCustomerId) {
           try {
             await recordSyncroPayment(
               syncroInvoiceId,
@@ -362,8 +127,7 @@ router.post(
               amountString,
               paymentIntentId,
               null,
-              null,
-              "Web"
+              null
             );
 
             invoiceCustomerCache.delete(syncroInvoiceId);
@@ -374,12 +138,12 @@ router.post(
           } catch (syncroErr) {
             console.error(
               `❌ Failed to record online payment for Syncro Invoice #${syncroInvoiceId}:`,
-              syncroErr.message
+              syncroErr.response?.data || syncroErr.message
             );
           }
         } else {
           console.warn(
-            "⚠️ checkout.session.completed missing syncro_invoice_id in metadata."
+            `⚠️ checkout.session.completed missing syncro_invoice_id (${syncroInvoiceId}) or syncro_customer_id (${syncroCustomerId}) in metadata.`
           );
         }
       }
