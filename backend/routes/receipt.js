@@ -7,7 +7,6 @@ router.get("/:invoiceId", async (req, res) => {
   const { invoiceId } = req.params;
   const syncroSubdomain = process.env.SYNCRO_SUBDOMAIN;
   const syncroApiKey = process.env.SYNCRO_API_KEY;
-  const isDebug = req.query.debug === "true";
 
   // Exact CodeBlackIT Logo URL
   const LOGO_URL =
@@ -66,83 +65,36 @@ router.get("/:invoiceId", async (req, res) => {
       ? `<div style="border: 2px solid #000; font-weight: 900; padding: 2px 8px; font-size: 13px; text-transform: uppercase; margin-bottom: 6px; display: inline-block;">PAID IN FULL</div>`
       : "";
 
-    // 2. Fetch Payment Signature & Diagnostic Data
-    let signatureUrl =
-      invoice.signature_image ||
-      invoice.signature_url ||
-      invoice.signature_data ||
-      null;
-
-    let paymentData = null;
+    // 2. Resolve Payment ID & Signature
     let paymentId = null;
+    let hasSignature = false;
 
     if (Array.isArray(invoice.payments) && invoice.payments.length > 0) {
       paymentId = invoice.payments[0].id || invoice.payments[0].payment_id;
-      const signedPayment = invoice.payments.find(
-        (p) =>
-          p.signature_image ||
-          p.signature_url ||
-          p.signature_data ||
-          p.signature ||
-          p.signature_data_url ||
-          p.data_url
-      );
-      if (signedPayment) {
-        signatureUrl =
-          signedPayment.signature_image ||
-          signedPayment.signature_url ||
-          signedPayment.signature_data ||
-          signedPayment.signature ||
-          signedPayment.signature_data_url ||
-          signedPayment.data_url;
-      }
     } else if (Array.isArray(invoice.payment_ids) && invoice.payment_ids.length > 0) {
       paymentId = invoice.payment_ids[0];
     }
 
-    if (!signatureUrl && paymentId) {
+    // Check payment signature status
+    if (paymentId) {
       try {
         const payRes = await axios.get(
           `https://${syncroSubdomain}.syncromsp.com/api/v1/payments/${paymentId}?api_key=${syncroApiKey}`,
           { timeout: 5000 }
         );
-        paymentData = payRes.data?.payment || {};
-        signatureUrl =
-          paymentData.signature_image ||
-          paymentData.signature_url ||
-          paymentData.signature_data ||
-          paymentData.signature ||
-          paymentData.signature_data_url ||
-          paymentData.data_url ||
-          null;
+        const paymentData = payRes.data?.payment || {};
+        if (paymentData.signature_date || paymentData.ref_num) {
+          hasSignature = true;
+        }
       } catch (payErr) {
-        console.warn("⚠️ Could not fetch payment signature:", payErr.message);
+        console.warn("⚠️ Payment lookup notice:", payErr.message);
       }
     }
 
-    // Fallback: Check customer profile
-    if (!signatureUrl && customer.signature) {
-      signatureUrl = customer.signature;
-    }
-
-    // =========================================================================
-    // DEBUG MODE (Triggered via ?debug=true in the URL)
-    // =========================================================================
-    if (isDebug) {
-      return res.json({
-        payment_id_found: paymentId,
-        all_payment_keys: paymentData ? Object.keys(paymentData) : "No payment data returned",
-        detected_signature_preview: signatureUrl
-          ? signatureUrl.substring(0, 80) + "..."
-          : "None found",
-        payment_raw_object: paymentData,
-      });
-    }
-
-    // Format Base64 signature prefix if raw
-    if (signatureUrl && !signatureUrl.startsWith("data:") && !signatureUrl.startsWith("http")) {
-      signatureUrl = `data:image/bmp;base64,${signatureUrl}`;
-    }
+    // Syncro direct signature URL (browser authenticated)
+    const signatureSrc = paymentId
+      ? `https://${syncroSubdomain}.syncromsp.com/payments/${paymentId}/signature`
+      : null;
 
     // 3. Render Line Items Table Rows
     const lineItems = invoice.line_items || [];
@@ -407,7 +359,7 @@ router.get("/:invoiceId", async (req, res) => {
     window.addEventListener('load', function() {
       setTimeout(function() {
         window.print();
-      }, 250);
+      }, 350);
     });
   </script>
 </head>
@@ -517,9 +469,9 @@ router.get("/:invoiceId", async (req, res) => {
       <!-- Customer Signature Section -->
       <div class="signature-container">
         ${
-          signatureUrl
+          hasSignature && signatureSrc
             ? `
-          <img class="signature-img-tag" src="${signatureUrl}" alt="Customer Signature" />
+          <img class="signature-img-tag" src="${signatureSrc}" alt="Customer Signature" onerror="this.style.display='none'" />
           <div class="signature-line">Customer Signature</div>
         `
             : `
