@@ -10,7 +10,7 @@ require("isomorphic-fetch");
 router.use(express.json());
 
 const stripe = new Stripe(process.env.STRIPE_SECRET_KEY, {
-  timeout: 10000, // 10s Stripe API timeout
+  timeout: 10000,
 });
 
 // Configure Azure Application Authentication
@@ -48,7 +48,7 @@ router.post("/send-payment-email", async (req, res) => {
       return res.status(400).json({ success: false, error: "Missing invoiceId." });
     }
 
-    // 2. Syncro API Call (8s timeout)
+    // 2. Syncro API Call
     const syncroSubdomain = process.env.SYNCRO_SUBDOMAIN;
     const syncroApiKey = process.env.SYNCRO_API_KEY;
 
@@ -93,8 +93,8 @@ router.post("/send-payment-email", async (req, res) => {
 
     const amountInCents = Math.round((invoice.balance_due || amount) * 100);
 
-    // 3. Stripe Checkout Session
-    console.log(`➡️ [4/7] Creating Stripe Checkout Session ($${(amountInCents/100).toFixed(2)})...`);
+    // 3. Stripe Checkout Session (Cards + ACH Direct Debit)
+    console.log(`➡️ [4/7] Creating Stripe Checkout Session ($${(amountInCents / 100).toFixed(2)})...`);
     const session = await stripe.checkout.sessions.create({
       payment_method_types: ["card", "us_bank_account"],
       payment_method_options: {
@@ -108,7 +108,7 @@ router.post("/send-payment-email", async (req, res) => {
             currency: "usd",
             product_data: {
               name: `Invoice #${invoice.number}`,
-              description: `Payment for ${invoice.customer_business_then_name || "SyncroMSP Invoice"}`,
+              description: `Payment for ${invoice.customer_business_then_name || "CodeBlackIT Services"}`,
             },
             unit_amount: amountInCents,
           },
@@ -127,24 +127,63 @@ router.post("/send-payment-email", async (req, res) => {
 
     console.log(`➡️ [5/7] Stripe Session created: ${session.id}`);
 
-    // 4. Build Email Content
-    const emailSubject = `Payment Requested: Invoice #${invoice.number}`;
+    // Fetch and buffer the official Syncro PDF printout
+    let attachments = [];
+    try {
+      console.log(`➡️ Fetching PDF printout for Invoice #${invoice.id}...`);
+      const pdfRes = await axios.get(
+        `https://${syncroSubdomain}.syncromsp.com/api/v1/invoices/${invoice.id}/print?api_key=${syncroApiKey}`,
+        { responseType: "arraybuffer", timeout: 8000 }
+      );
+
+      if (pdfRes.data) {
+        const base64Pdf = Buffer.from(pdfRes.data).toString("base64");
+        attachments.push({
+          "@odata.type": "#microsoft.graph.fileAttachment",
+          name: `Invoice_${invoice.number || invoice.id}.pdf`,
+          contentType: "application/pdf",
+          contentBytes: base64Pdf,
+        });
+        console.log(`📎 Attached Invoice_${invoice.number || invoice.id}.pdf (${base64Pdf.length} bytes base64)`);
+      }
+    } catch (pdfErr) {
+      console.warn("⚠️ Could not fetch Syncro PDF attachment, proceeding without it:", pdfErr.message);
+    }
+
+    // 4. Build Email HTML Body
+    const emailSubject = `Invoice #${invoice.number || invoice.id} from CodeBlackIT`;
     const emailHtml = `
-      <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 20px; border: 1px solid #e0e0e0; border-radius: 6px;">
-        <h2 style="color: #333;">Payment Request for Invoice #${invoice.number}</h2>
-        <p>Dear Customer,</p>
-        <p>A new payment link has been generated for your invoice.</p>
-        <p><strong>Balance Due:</strong> $${(amountInCents / 100).toFixed(2)}</p>
-        <p>You can securely complete your payment online using either a <strong>Credit Card</strong> or <strong>ACH Direct Bank Transfer</strong>:</p>
-        <p style="margin-top: 25px; text-align: center;">
-          <a href="${session.url}" style="background-color: #635bff; color: white; padding: 12px 24px; text-decoration: none; border-radius: 4px; font-weight: bold; display: inline-block;">Pay Invoice Now</a>
-        </p>
-        <hr style="margin-top: 30px; border: 0; border-top: 1px solid #eee;" />
-        <p style="font-size: 12px; color: #777;">If you have any questions, please reply directly to this email.</p>
+      <div style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 24px; border: 1px solid #e2e8f0; border-radius: 8px; color: #1a202c;">
+        <h2 style="margin-top: 0; color: #2d3748;">Invoice #${invoice.number || invoice.id}</h2>
+        <p>Hello,</p>
+        <p>Your invoice from <strong>CodeBlackIT</strong> is ready for review and payment.</p>
+        
+        <div style="background-color: #f7fafc; border: 1px solid #edf2f7; border-radius: 6px; padding: 16px; margin: 20px 0;">
+          <table style="width: 100%; border-collapse: collapse;">
+            <tr>
+              <td style="color: #718096; font-size: 14px;">Invoice Number:</td>
+              <td style="text-align: right; font-weight: bold;">#${invoice.number || invoice.id}</td>
+            </tr>
+            <tr>
+              <td style="color: #718096; font-size: 14px; padding-top: 8px;">Balance Due:</td>
+              <td style="text-align: right; font-weight: bold; color: #2b6cb0; font-size: 18px; padding-top: 8px;">$${(amountInCents / 100).toFixed(2)}</td>
+            </tr>
+          </table>
+        </div>
+
+        <p>You can securely pay online using a <strong>Credit Card</strong> or <strong>Direct Bank Transfer (ACH)</strong>:</p>
+        
+        <div style="text-align: center; margin: 30px 0;">
+          <a href="${session.url}" style="background-color: #00796b; color: #ffffff; padding: 12px 28px; text-decoration: none; border-radius: 6px; font-weight: bold; font-size: 16px; display: inline-block;">Pay Invoice Now</a>
+        </div>
+
+        <p style="font-size: 13px; color: #718096;">A copy of your invoice PDF is attached to this email for your records.</p>
+        <hr style="margin-top: 30px; border: 0; border-top: 1px solid #e2e8f0;" />
+        <p style="font-size: 12px; color: #a0aec0; text-align: center; margin-bottom: 0;">CodeBlackIT | Computer & IT Services</p>
       </div>
     `;
 
-    // 5. Build BCC list (Personal mailbox + Syncro Inbound Email)
+    // 5. Build BCC List (Sender Mailbox + Syncro Inbound)
     const senderEmail = process.env.O365_USER_EMAIL;
     const syncroInboundEmail = process.env.SYNCRO_INBOUND_EMAIL;
 
@@ -176,6 +215,7 @@ router.post("/send-payment-email", async (req, res) => {
             },
           ],
           bccRecipients: bccList,
+          attachments: attachments,
         },
         saveToSentItems: true,
       };
@@ -184,14 +224,14 @@ router.post("/send-payment-email", async (req, res) => {
         .api(`/users/${senderEmail}/sendMail`)
         .post(mailPayload);
 
-      console.log("✅ Email successfully sent via Microsoft Graph API (Customer + BCC Inbound Delivered)!");
+      console.log("✅ Email successfully sent via Microsoft Graph API!");
       emailSent = true;
 
-      // 6. Attach Communication Record (Only if tied to a Syncro Ticket)
+      // 6. Log Communication in Syncro Ticket (if linked)
       console.log(`➡️ [7/7] Checking Syncro communication logging...`);
       if (invoice.ticket_id) {
         try {
-          const emailLogBody = `✉️ Payment request email sent to ${customerEmail} for Invoice #${invoice.number} ($${(amountInCents / 100).toFixed(2)}).\nStripe Link: ${session.url}`;
+          const emailLogBody = `✉️ Payment request email sent to ${customerEmail} for Invoice #${invoice.number} ($${(amountInCents / 100).toFixed(2)}).\nStripe Checkout: ${session.url}`;
 
           await axios.post(
             `https://${syncroSubdomain}.syncromsp.com/api/v1/tickets/${invoice.ticket_id}/comment?api_key=${syncroApiKey}`,
@@ -203,26 +243,22 @@ router.post("/send-payment-email", async (req, res) => {
             },
             { headers: { "Content-Type": "application/json" }, timeout: 8000 }
           );
-          console.log(`✉️ Email log attached to Ticket #${invoice.ticket_id} communications!`);
+          console.log(`✉️ Email log attached to Ticket #${invoice.ticket_id}!`);
         } catch (commErr) {
           console.warn("⚠️ Failed to attach comment to Syncro ticket:", commErr.response?.data || commErr.message);
         }
-      } else {
-        console.log(`ℹ️ Invoice #${invoice.id} is standalone (no ticket_id). Relying on BCC to Syncro Inbound Email.`);
       }
-
     } catch (graphErr) {
       console.error("⚠️ Microsoft Graph API failed to send email:", graphErr.message);
       emailError = graphErr.message;
     }
 
-    console.log("✅ Responding to client.");
     return res.json({
       success: true,
       emailSent: emailSent,
       paymentUrl: session.url,
       message: emailSent
-        ? `Payment link generated, sent to ${customerEmail}, and BCC'd to Syncro inbound.`
+        ? `Payment link generated, PDF attached, and email sent to ${customerEmail}.`
         : `Payment link generated, but email failed: ${emailError}`,
     });
 
