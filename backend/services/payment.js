@@ -18,8 +18,7 @@ async function recordSyncroPayment(
   amount,
   paymentIntentId,
   signatureUrl = null,
-  fileId = null,
-  paymentMethod = "Terminal"
+  fileId = null
 ) {
   const syncroSubdomain = process.env.SYNCRO_SUBDOMAIN;
   const syncroApiKey = process.env.SYNCRO_API_KEY;
