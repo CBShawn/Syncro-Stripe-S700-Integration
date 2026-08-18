@@ -162,7 +162,8 @@ async function recordSyncroPayment(
     // 4. TRANSACTION RESPONSE
     // ============================================================
     const transactionresponse = [
-      `Channel: ${paymentChannel}`,
+      `Card: ${cardInfo.bank_name ? cardInfo.bank_name : (cardInfo.brand || "N/A")}`,
+      `Issuer: ${cardInfo.issuer || cardInfo.bank_name || "N/A"}`,
       `Method: ${cardInfo.bank_name || cardInfo.brand || "Card"}`,
       `Last: ${cardInfo.last4 || "N/A"}`,
       `PI: ${stripePayment?.id || stripePaymentIntentId || "N/A"}`,
