@@ -14,7 +14,7 @@ router.post("/send-payment-email", async (req, res) => {
   console.log("➡️ [1/5] send-payment-email endpoint reached!");
 
   try {
-    // 1. Auth check
+    // 1. Authenticate Extension Request
     const extensionKey = req.headers["x-extension-key"];
     if (process.env.EXTENSION_AUTH_KEY && extensionKey !== process.env.EXTENSION_AUTH_KEY) {
       console.log("❌ Unauthorized extension key");
@@ -49,7 +49,7 @@ router.post("/send-payment-email", async (req, res) => {
       return res.status(400).json({ success: false, error: "Invoice is already paid or has no balance due." });
     }
 
-    // Resolve Customer Email
+    // Resolve Customer Email & ID
     let customerEmail = invoice.customer_email || invoice.customer?.email;
     let targetCustomerId = customerId || invoice.customer_id || invoice.customer?.id;
 
@@ -86,7 +86,7 @@ router.post("/send-payment-email", async (req, res) => {
           price_data: {
             currency: "usd",
             product_data: {
-              name: `Invoice #${invoice.number}`,
+              name: `Invoice #${invoice.number || invoice.id}`,
               description: `Payment for ${invoice.customer_business_then_name || "CodeBlackIT Services"}`,
             },
             unit_amount: amountInCents,
@@ -106,18 +106,36 @@ router.post("/send-payment-email", async (req, res) => {
 
     console.log(`➡️ Stripe Session created: ${session.id}`);
 
-    // 4. Build Custom Email Body with Stripe Link
-    const emailSubject = `Invoice #${invoice.number || invoice.id} from CodeBlackIT`;
-    const emailBody = `Hello,\n\nYour invoice #${invoice.number || invoice.id} is ready for review and payment.\n\nBalance Due: $${(amountInCents / 100).toFixed(2)}\n\nYou can pay securely online with a Credit Card or Direct Bank Transfer (ACH) using the link below:\n${session.url}\n\nThank you for your business!\nCodeBlackIT | Computer & IT Services`;
+    // Build the styled payment HTML block to place in invoice notes
+    const paymentButtonHtml = `
+      <div style="margin: 15px 0;">
+        <a href="${session.url}" style="background-color: #00796b; color: #ffffff; padding: 12px 24px; text-decoration: none; border-radius: 4px; font-weight: bold; display: inline-block;">Pay Online (Card or Direct ACH)</a>
+      </div>
+      <p style="font-size: 12px; color: #666; margin: 4px 0 0 0;">
+        Direct link: <a href="${session.url}">${session.url}</a>
+      </p>
+    `.trim();
 
-    // 5. Send & Log via Syncro's Native Invoice Mailer API
-    console.log(`➡️ [5/5] Sending and logging email via Syncro API...`);
-    const syncroMailRes = await axios.post(
+    // 4. Inject Stripe link into Invoice 'notes' field via Syncro API
+    console.log(`➡️ Updating Invoice #${invoice.id} notes with Stripe ACH URL...`);
+    await axios.put(
+      `https://${syncroSubdomain}.syncromsp.com/api/v1/invoices/${invoice.id}?api_key=${syncroApiKey}`,
+      {
+        notes: paymentButtonHtml,
+      },
+      {
+        headers: { "Content-Type": "application/json" },
+        timeout: 8000,
+      }
+    );
+
+    // 5. Trigger Syncro's Native Email Dispatch
+    console.log(`➡️ [5/5] Dispatching email via Syncro mailer for logging & PDF attachment...`);
+    await axios.post(
       `https://${syncroSubdomain}.syncromsp.com/api/v1/invoices/${invoice.id}/email?api_key=${syncroApiKey}`,
       {
         email: customerEmail,
-        subject: emailSubject,
-        body: emailBody,
+        subject: `Invoice #${invoice.number || invoice.id} from CodeBlackIT`,
       },
       {
         headers: { "Content-Type": "application/json" },
@@ -131,7 +149,7 @@ router.post("/send-payment-email", async (req, res) => {
       success: true,
       emailSent: true,
       paymentUrl: session.url,
-      message: `Payment link created and email logged in Syncro for ${customerEmail}.`,
+      message: `Invoice updated with Stripe link, dispatched, and logged in Syncro for ${customerEmail}.`,
     });
 
   } catch (err) {
