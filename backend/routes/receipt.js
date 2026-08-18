@@ -8,7 +8,6 @@ router.get("/:invoiceId", async (req, res) => {
   const syncroSubdomain = process.env.SYNCRO_SUBDOMAIN;
   const syncroApiKey = process.env.SYNCRO_API_KEY;
 
-  // Exact CodeBlackIT Logo URL
   const LOGO_URL =
     process.env.RECEIPT_LOGO_URL ||
     "https://codeblackit.com/wp-content/uploads/2018/05/RepairShopr-Logo.jpg";
@@ -18,7 +17,6 @@ router.get("/:invoiceId", async (req, res) => {
   }
 
   try {
-    // 1. Fetch invoice data from Syncro
     const response = await axios.get(
       `https://${syncroSubdomain}.syncromsp.com/api/v1/invoices/${invoiceId}?api_key=${syncroApiKey}`,
       { timeout: 8000 }
@@ -29,7 +27,6 @@ router.get("/:invoiceId", async (req, res) => {
       return res.status(404).send("Invoice not found.");
     }
 
-    // Customer & Account Data
     const customer = invoice.customer || {};
     const customerName =
       invoice.customer_business_then_name ||
@@ -45,7 +42,6 @@ router.get("/:invoiceId", async (req, res) => {
     const customerZip = customer.zip || "";
     const customerPhone = customer.phone || customer.mobile || "";
 
-    // Financial Values
     const subtotal = `$${parseFloat(invoice.subtotal || 0).toFixed(2)}`;
     const tax = `$${parseFloat(invoice.tax || 0).toFixed(2)}`;
     const total = `$${parseFloat(invoice.total || 0).toFixed(2)}`;
@@ -65,38 +61,6 @@ router.get("/:invoiceId", async (req, res) => {
       ? `<div style="border: 2px solid #000; font-weight: 900; padding: 2px 8px; font-size: 13px; text-transform: uppercase; margin-bottom: 6px; display: inline-block;">PAID IN FULL</div>`
       : "";
 
-    // 2. Resolve Payment ID & Signature
-    let paymentId = null;
-    let hasSignature = false;
-
-    if (Array.isArray(invoice.payments) && invoice.payments.length > 0) {
-      paymentId = invoice.payments[0].id || invoice.payments[0].payment_id;
-    } else if (Array.isArray(invoice.payment_ids) && invoice.payment_ids.length > 0) {
-      paymentId = invoice.payment_ids[0];
-    }
-
-    // Check payment signature status
-    if (paymentId) {
-      try {
-        const payRes = await axios.get(
-          `https://${syncroSubdomain}.syncromsp.com/api/v1/payments/${paymentId}?api_key=${syncroApiKey}`,
-          { timeout: 5000 }
-        );
-        const paymentData = payRes.data?.payment || {};
-        if (paymentData.signature_date || paymentData.ref_num) {
-          hasSignature = true;
-        }
-      } catch (payErr) {
-        console.warn("⚠️ Payment lookup notice:", payErr.message);
-      }
-    }
-
-    // Syncro direct signature URL (browser authenticated)
-    const signatureSrc = paymentId
-      ? `https://${syncroSubdomain}.syncromsp.com/payments/${paymentId}/signature`
-      : null;
-
-    // 3. Render Line Items Table Rows
     const lineItems = invoice.line_items || [];
     const lineItemsHtml = lineItems
       .map(
@@ -112,7 +76,6 @@ router.get("/:invoiceId", async (req, res) => {
       )
       .join("");
 
-    // 4. Generate Complete 80mm HTML Template
     const html = `
 <!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Transitional//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-transitional.dtd">
 <html xmlns="http://www.w3.org/1999/xhtml">
@@ -141,225 +104,80 @@ router.get("/:invoiceId", async (req, res) => {
       background: #fff;
     }
 
-    .print-container {
-      width: 100%;
-      clear: both;
-    }
-
+    .print-container { width: 100%; clear: both; }
     .center { text-align: center; }
     .right { text-align: right; }
     .left { text-align: left; }
     .bold { font-weight: bold; }
 
-    .invheader {
-      width: 100%;
-      margin-bottom: 8px;
+    .invheader { width: 100%; margin-bottom: 8px; }
+    .invheader-upper { width: 100%; margin-bottom: 8px; border-bottom: 1px dashed #000; padding-bottom: 6px; text-align: center; }
+    .invheader-logo img { max-height: 60px; max-width: 210px; height: auto; width: auto; display: block; margin: 0 auto 4px auto; background: #ffffff; }
+    .invheader-address-account { font-size: 11px; line-height: 14px; margin-top: 4px; }
+    .invheader-lower { width: 100%; margin-top: 4px; margin-bottom: 8px; }
+    .invheader-address-client { font-size: 11px; line-height: 14px; margin-bottom: 6px; }
+
+    .invheader-invoicedetails { width: 100%; margin-top: 6px; }
+    .invheader-invoicedetails table { width: 100%; border-collapse: collapse; }
+    .invheader-invoicedetails table th { width: 50%; font-weight: normal; text-align: left; font-size: 11px; padding: 2px 0; }
+    .invheader-invoicedetails table td { text-align: right; font-size: 11px; padding: 2px 0; }
+    .invheader-invoicedetails-balance th, .invheader-invoicedetails-balance td {
+      background-color: #e5e5e5; border-top: solid 1px #000; border-bottom: solid 1px #000; font-weight: bold; padding: 4px 2px !important;
     }
 
-    .invheader-upper {
-      width: 100%;
-      margin-bottom: 8px;
-      border-bottom: 1px dashed #000;
-      padding-bottom: 6px;
-      text-align: center;
+    .invbody { width: 100%; clear: both; }
+    .invbody-items { width: 100%; border-collapse: collapse; margin-top: 6px; margin-bottom: 8px; }
+    .invbody-items th { background-color: #e3e3e3; border-top: solid 1px #000; border-bottom: solid 1px #000; font-size: 9.5px; text-transform: uppercase; padding: 3px 1px; text-align: left; }
+    .invbody-items td { padding: 4px 1px; border-bottom: solid 1px #e5e5e5; font-size: 10px; vertical-align: top; }
+    .invbody-items .unitcost, .invbody-items .quantity, .invbody-items .linetotal { text-align: right; }
+
+    .invbody-summary { width: 100%; margin-top: 6px; border-top: solid 2px #000; padding-top: 4px; }
+    .invbody-summary table { width: 100%; border-collapse: collapse; }
+    .invbody-summary th { font-weight: normal; text-align: left; font-size: 11px; padding: 2px 0; }
+    .invbody-summary td { text-align: right; font-size: 11px; padding: 2px 0; }
+    .invbody-summary-total th, .invbody-summary-total td {
+      background-color: #e5e5e5; border-top: solid 1px #000; border-bottom: solid 1px #000; font-weight: bold; padding: 4px 2px !important; font-size: 12px;
     }
 
-    .invheader-logo img {
-      max-height: 60px;
-      max-width: 210px;
-      height: auto;
-      width: auto;
-      display: block;
-      margin: 0 auto 4px auto;
-      background: #ffffff;
-    }
-
-    .invheader-address-account {
-      font-size: 11px;
-      line-height: 14px;
-      margin-top: 4px;
-    }
-
-    .invheader-lower {
-      width: 100%;
-      margin-top: 4px;
-      margin-bottom: 8px;
-    }
-
-    .invheader-address-client {
-      font-size: 11px;
-      line-height: 14px;
-      margin-bottom: 6px;
-    }
-
-    .invheader-invoicedetails {
-      width: 100%;
-      margin-top: 6px;
-    }
-
-    .invheader-invoicedetails table {
-      width: 100%;
-      border-collapse: collapse;
-    }
-
-    .invheader-invoicedetails table th {
-      width: 50%;
-      font-weight: normal;
-      text-align: left;
-      font-size: 11px;
-      padding: 2px 0;
-    }
-
-    .invheader-invoicedetails table td {
-      text-align: right;
-      font-size: 11px;
-      padding: 2px 0;
-    }
-
-    .invheader-invoicedetails-balance th,
-    .invheader-invoicedetails-balance td {
-      background-color: #e5e5e5;
-      border-top: solid 1px #000;
-      border-bottom: solid 1px #000;
-      font-weight: bold;
-      padding: 4px 2px !important;
-    }
-
-    /* ITEMS TABLE */
-    .invbody {
-      width: 100%;
-      clear: both;
-    }
-
-    .invbody-items {
-      width: 100%;
-      border-collapse: collapse;
-      margin-top: 6px;
-      margin-bottom: 8px;
-    }
-
-    .invbody-items th {
-      background-color: #e3e3e3;
-      border-top: solid 1px #000;
-      border-bottom: solid 1px #000;
-      font-size: 9.5px;
-      text-transform: uppercase;
-      padding: 3px 1px;
-      text-align: left;
-    }
-
-    .invbody-items td {
-      padding: 4px 1px;
-      border-bottom: solid 1px #e5e5e5;
-      font-size: 10px;
-      vertical-align: top;
-    }
-
-    .invbody-items .unitcost,
-    .invbody-items .quantity,
-    .invbody-items .linetotal {
-      text-align: right;
-    }
-
-    /* SUMMARY TABLE */
-    .invbody-summary {
-      width: 100%;
-      margin-top: 6px;
-      border-top: solid 2px #000;
-      padding-top: 4px;
-    }
-
-    .invbody-summary table {
-      width: 100%;
-      border-collapse: collapse;
-    }
-
-    .invbody-summary th {
-      font-weight: normal;
-      text-align: left;
-      font-size: 11px;
-      padding: 2px 0;
-    }
-
-    .invbody-summary td {
-      text-align: right;
-      font-size: 11px;
-      padding: 2px 0;
-    }
-
-    .invbody-summary-total th,
-    .invbody-summary-total td {
-      background-color: #e5e5e5;
-      border-top: solid 1px #000;
-      border-bottom: solid 1px #000;
-      font-weight: bold;
-      padding: 4px 2px !important;
-      font-size: 12px;
-    }
-
-    .disclaimer-sec {
-      margin-top: 10px;
-      border-top: 1px dashed #000;
-      padding-top: 6px;
-    }
-
-    .disclaimer-sec h2 {
-      font-size: 11px;
-      margin: 0 0 2px 0;
-      text-transform: uppercase;
-    }
-
-    .disclaimer-sec p {
-      font-size: 9px;
-      line-height: 12px;
-      margin: 0;
-    }
+    .disclaimer-sec { margin-top: 10px; border-top: 1px dashed #000; padding-top: 6px; }
+    .disclaimer-sec h2 { font-size: 11px; margin: 0 0 2px 0; text-transform: uppercase; }
+    .disclaimer-sec p { font-size: 9px; line-height: 12px; margin: 0; }
 
     /* SIGNATURE BLOCK */
-    .signature-container {
-      margin-top: 12px;
-      text-align: center;
-      width: 100%;
-    }
+    .signature-container { margin-top: 12px; text-align: center; width: 100%; min-height: 60px; }
+    .signature-img-tag { max-width: 220px; max-height: 70px; width: auto; height: auto; background-color: #ffffff !important; display: block; margin: 0 auto 4px auto; }
+    .signature-line { border-top: 1px solid #000; margin-top: 2px; padding-top: 2px; font-size: 10px; text-align: center; font-weight: bold; }
 
-    .signature-img-tag {
-      max-width: 220px;
-      max-height: 70px;
-      width: auto;
-      height: auto;
-      background-color: #ffffff !important;
-      display: block;
-      margin: 0 auto 4px auto;
-    }
+    .barcode-container { text-align: center; padding: 10px 0; }
+    .barcode-container img { max-width: 100%; height: 35px; }
 
-    .signature-line {
-      border-top: 1px solid #000;
-      margin-top: 2px;
-      padding-top: 2px;
-      font-size: 10px;
-      text-align: center;
-      font-weight: bold;
-    }
-
-    .barcode-container {
-      text-align: center;
-      padding: 10px 0;
-    }
-
-    .barcode-container img {
-      max-width: 100%;
-      height: 35px;
-    }
-
-    @media print {
-      body { width: 72mm; margin: 0 auto; }
-    }
+    @media print { body { width: 72mm; margin: 0 auto; } }
   </style>
   <script>
-    window.addEventListener('load', function() {
-      setTimeout(function() {
+    var hasPrinted = false;
+
+    function triggerPrint() {
+      if (!hasPrinted) {
+        hasPrinted = true;
         window.print();
-      }, 350);
+      }
+    }
+
+    // Listen for signature pushed from Chrome Extension
+    window.addEventListener('message', function(event) {
+      if (event.data && event.data.type === 'SYNCRO_SIGNATURE' && event.data.signature) {
+        var img = document.getElementById('rendered-signature-img');
+        if (img) {
+          img.src = event.data.signature;
+          img.style.display = 'block';
+          setTimeout(triggerPrint, 250);
+        }
+      }
+    });
+
+    // Fallback print if no signature exists
+    window.addEventListener('load', function() {
+      setTimeout(triggerPrint, 900);
     });
   </script>
 </head>
@@ -393,18 +211,9 @@ router.get("/:invoiceId", async (req, res) => {
       <div class="invheader-invoicedetails">
         <table cellspacing="0">
           <tbody>
-            <tr>
-              <th>Invoice #</th>
-              <td>${invoice.number || invoice.id}</td>
-            </tr>
-            <tr>
-              <th>Invoice Date</th>
-              <td>${dateFormatted}</td>
-            </tr>
-            <tr class="invheader-invoicedetails-balance">
-              <th>Balance Due</th>
-              <td>${balanceDue}</td>
-            </tr>
+            <tr><th>Invoice #</th><td>${invoice.number || invoice.id}</td></tr>
+            <tr><th>Invoice Date</th><td>${dateFormatted}</td></tr>
+            <tr class="invheader-invoicedetails-balance"><th>Balance Due</th><td>${balanceDue}</td></tr>
           </tbody>
         </table>
       </div>
@@ -431,32 +240,11 @@ router.get("/:invoiceId", async (req, res) => {
       <div class="invheader-invoicedetails">
         <table cellspacing="0">
           <tbody>
-            <tr>
-              <th><strong>Subtotal</strong></th>
-              <td><strong>${subtotal}</strong></td>
-            </tr>
-            ${
-              parseFloat(invoice.tax || 0) > 0
-                ? `
-              <tr>
-                <th>Tax</th>
-                <td>${tax}</td>
-              </tr>
-            `
-                : ""
-            }
-            <tr>
-              <th>Invoice Total</th>
-              <td>${total}</td>
-            </tr>
-            <tr>
-              <th>Payments</th>
-              <td>${paymentsAmount}</td>
-            </tr>
-            <tr class="invbody-summary-total">
-              <th><strong>Balance Due</strong></th>
-              <td><strong>${balanceDue}</strong></td>
-            </tr>
+            <tr><th><strong>Subtotal</strong></th><td><strong>${subtotal}</strong></td></tr>
+            ${parseFloat(invoice.tax || 0) > 0 ? `<tr><th>Tax</th><td>${tax}</td></tr>` : ""}
+            <tr><th>Invoice Total</th><td>${total}</td></tr>
+            <tr><th>Payments</th><td>${paymentsAmount}</td></tr>
+            <tr class="invbody-summary-total"><th><strong>Balance Due</strong></th><td><strong>${balanceDue}</strong></td></tr>
           </tbody>
         </table>
       </div>
@@ -468,17 +256,8 @@ router.get("/:invoiceId", async (req, res) => {
 
       <!-- Customer Signature Section -->
       <div class="signature-container">
-        ${
-          hasSignature && signatureSrc
-            ? `
-          <img class="signature-img-tag" src="${signatureSrc}" alt="Customer Signature" onerror="this.style.display='none'" />
-          <div class="signature-line">Customer Signature</div>
-        `
-            : `
-          <div style="height: 35px;"></div>
-          <div class="signature-line">Customer Signature</div>
-        `
-        }
+        <img id="rendered-signature-img" class="signature-img-tag" style="display:none;" alt="Customer Signature" />
+        <div class="signature-line">Customer Signature</div>
       </div>
 
     </div>
