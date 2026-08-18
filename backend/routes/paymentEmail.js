@@ -106,11 +106,11 @@ router.post("/send-payment-email", async (req, res) => {
 
     console.log(`➡️ Stripe Session created: ${session.id}`);
 
-    // 4. Build the custom invoice message
-    const customInvoiceMessage = `Pay Online (Credit Card or Direct ACH Bank Transfer):\n${session.url}`;
+    // 4. Pass the raw Stripe URL directly
+    const customInvoiceMessage = session.url;
 
     // 5. Send & Log via Syncro's Native Invoice Mailer API
-    console.log(`➡️ [5/5] Dispatching via Syncro Invoice Mailer using custom_invoice_message...`);
+    console.log(`➡️ [5/5] Dispatching via Syncro Invoice Mailer...`);
     await axios.post(
       `https://${syncroSubdomain}.syncromsp.com/api/v1/invoices/${invoice.id}/email?api_key=${syncroApiKey}`,
       {
