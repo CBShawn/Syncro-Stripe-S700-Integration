@@ -92,7 +92,7 @@ async function recordSyncroPayment(
     }
 
     // ============================================================
-    // 2. GET STRIPE PAYMENT DETAILS (CARD / ACH / TERMINAL)
+    // 2. GET STRIPE PAYMENT DETAILS (CARD / CARD_PRESENT / ACH)
     // ============================================================
     let stripePayment = null;
     let isCheckoutSession = String(stripePaymentIntentId).startsWith("cs_");
@@ -122,15 +122,16 @@ async function recordSyncroPayment(
     const cardDetails = stripePayment?.payment_method?.card || {};
     const usBankAccount = stripePayment?.payment_method?.us_bank_account || {};
 
-    const cardInfo = cardPresent.brand 
+    const isTerminal = Boolean(cardPresent.brand);
+    const cardInfo = isTerminal 
       ? cardPresent 
       : (cardDetails.brand ? cardDetails : usBankAccount);
 
-    const paymentType = cardPresent.brand 
-      ? "Stripe Terminal" 
-      : (usBankAccount.bank_name ? "Stripe ACH" : "Stripe Online");
+    const paymentChannel = isTerminal
+      ? "Stripe Terminal"
+      : (usBankAccount.bank_name ? "Stripe Online ACH" : "Stripe Online");
 
-    const referenceString = `${stripeInvoiceId || stripePaymentIntentId || "Stripe_Payment"}`;
+    const referenceString = `${stripeInvoiceId || stripePayment?.id || stripePaymentIntentId || "Stripe_Payment"}`;
     const nowIso = new Date().toISOString();
     const todayDate = nowIso.split("T")[0];
 
@@ -138,13 +139,21 @@ async function recordSyncroPayment(
     // 3. BUILD NOTES
     // ============================================================
     const notesstring = [
-      `${paymentType} Payment`,
+      `${paymentChannel} Payment`,
       `PaymentIntent: ${stripePayment?.id || stripePaymentIntentId || "N/A"}`,
       `Charge: ${stripePayment?.latest_charge?.id || stripePayment?.latest_charge || "N/A"}`,
-      `Method: ${cardInfo.bank_name || cardInfo.description || cardInfo.brand || "Card"}`,
+      `Method: ${cardInfo.bank_name ? "ACH Bank Debit" : (cardInfo.description || cardInfo.brand || "Card")}`,
       `Account/Card: ${cardInfo.bank_name ? cardInfo.bank_name : (cardInfo.brand || "N/A")}`,
+      `Cardholder: ${cardInfo.cardholder_name || "N/A"}`,
       `Last 4: ****${cardInfo.last4 || "N/A"}`,
-      `Funding: ${cardInfo.funding || (cardInfo.bank_name ? "Bank Account" : "N/A")}`,
+      `Funding: ${cardInfo.funding || (cardInfo.bank_name ? "Checking/Savings" : "N/A")}`,
+      `Issuer: ${cardInfo.issuer || cardInfo.bank_name || "N/A"}`,
+      `Country: ${cardInfo.country || "US"}`,
+      `Expiration: ${
+        cardInfo.exp_month
+          ? String(cardInfo.exp_month).padStart(2, "0")
+          : "N/A"
+      }/${cardInfo.exp_year || "N/A"}`,
       `Currency: ${stripePayment?.currency || "usd"}`,
       `Amount: $${amountFloat.toFixed(2)}`,
     ].join(" | ");
@@ -153,6 +162,7 @@ async function recordSyncroPayment(
     // 4. TRANSACTION RESPONSE
     // ============================================================
     const transactionresponse = [
+      `Channel: ${paymentChannel}`,
       `Method: ${cardInfo.bank_name || cardInfo.brand || "Card"}`,
       `Last: ${cardInfo.last4 || "N/A"}`,
       `PI: ${stripePayment?.id || stripePaymentIntentId || "N/A"}`,
@@ -162,7 +172,7 @@ async function recordSyncroPayment(
       .substring(0, 255);
 
     // ============================================================
-    // 5. CLEAN SYNCRO PAYMENT PAYLOAD
+    // 5. CLEAN SYNCRO PAYMENT PAYLOAD WITH SIGNATURE_DATE
     // ============================================================
     const payload = {
       payment: {
@@ -170,7 +180,7 @@ async function recordSyncroPayment(
         invoice_id: parsedInvoiceId,
         amount: amountFloat,
         amount_cents: totalCents,
-        payment_method: "Stripe Terminal",
+        payment_method: paymentChannel,
         ref_num: referenceString,
         applied_at: todayDate,
         signature_date: nowIso,
