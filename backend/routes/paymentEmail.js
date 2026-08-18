@@ -106,22 +106,12 @@ router.post("/send-payment-email", async (req, res) => {
 
     console.log(`➡️ Stripe Session created: ${session.id}`);
 
-    // Build the styled payment HTML block to place in invoice notes
-    const paymentButtonHtml = `
-      <div style="margin: 15px 0;">
-        <a href="${session.url}" style="background-color: #00796b; color: #ffffff; padding: 12px 24px; text-decoration: none; border-radius: 4px; font-weight: bold; display: inline-block;">Pay Online (Card or Direct ACH)</a>
-      </div>
-      <p style="font-size: 12px; color: #666; margin: 4px 0 0 0;">
-        Direct link: <a href="${session.url}">${session.url}</a>
-      </p>
-    `.trim();
-
-    // 4. Inject Stripe link into Invoice 'notes' field via Syncro API
+    // 4. Update Invoice Notes with Direct Stripe URL
     console.log(`➡️ Updating Invoice #${invoice.id} notes with Stripe ACH URL...`);
     await axios.put(
       `https://${syncroSubdomain}.syncromsp.com/api/v1/invoices/${invoice.id}?api_key=${syncroApiKey}`,
       {
-        notes: paymentButtonHtml,
+        notes: session.url,
       },
       {
         headers: { "Content-Type": "application/json" },
@@ -129,13 +119,26 @@ router.post("/send-payment-email", async (req, res) => {
       }
     );
 
-    // 5. Trigger Syncro's Native Email Dispatch
+    // 5. Send & Log via Syncro Native Mailer with Injected HTML Body
     console.log(`➡️ [5/5] Dispatching email via Syncro mailer for logging & PDF attachment...`);
+    const customerFirstName = invoice.customer?.firstname || invoice.customer_business_then_name || "there";
+    const emailBody = `
+<p>Hi ${customerFirstName},</p>
+<p>Your invoice #${invoice.number || invoice.id} for <strong>$${(amountInCents / 100).toFixed(2)}</strong> is ready for review.</p>
+<p>A PDF copy is attached to this email for your records.</p>
+<div style="margin: 20px 0;">
+  <a href="${session.url}" style="background-color: #00796b; color: #ffffff; padding: 12px 24px; text-decoration: none; border-radius: 4px; font-weight: bold; display: inline-block;">Pay Online (Card or Direct ACH)</a>
+</div>
+<p style="font-size: 13px; color: #555;">Or use this link directly: <a href="${session.url}">${session.url}</a></p>
+<p>Thank you for your business!<br><strong>CodeBlackIT</strong></p>
+    `.trim();
+
     await axios.post(
       `https://${syncroSubdomain}.syncromsp.com/api/v1/invoices/${invoice.id}/email?api_key=${syncroApiKey}`,
       {
         email: customerEmail,
         subject: `Invoice #${invoice.number || invoice.id} from CodeBlackIT`,
+        body: emailBody,
       },
       {
         headers: { "Content-Type": "application/json" },
