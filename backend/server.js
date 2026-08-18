@@ -1,4 +1,4 @@
-// Core
+// server.js
 require("dotenv").config();
 const express = require("express");
 
@@ -15,11 +15,11 @@ const webhookRoute = require("./routes/webhook");
 const statusRoutes = require("./routes/status");
 const signatureRoutes = require("./routes/signature");
 const terminalRoutes = require("./routes/terminal");
-const paymentEmailRoute = require("./routes/paymentEmail"); // New Route
-const receiptRoute = require("./routes/receipt"); // Added Receipt Route
+const paymentEmailRoute = require("./routes/paymentEmail");
+const receiptRoute = require("./routes/receipt");
 
 const app = express();
-const PORT = config.PORT;
+const PORT = config.PORT || process.env.PORT || 3000;
 
 // =========================================================================
 // MIDDLEWARE
@@ -39,7 +39,10 @@ app.use("/", statusRoutes);
 app.use("/", signatureRoutes);
 app.use("/api/terminal", terminalRoutes);
 app.use("/api", paymentEmailRoute); // Registers /api/send-payment-email
-app.use("/api", receiptRoute); // Registers POST /api/print-receipt
+
+// Mount Receipt route so /receipt/:invoiceId works directly
+app.use("/receipt", receiptRoute); 
+app.use("/api/receipt", receiptRoute); // Fallback alias
 
 app.get("/", (req, res) => {
   res.json({
