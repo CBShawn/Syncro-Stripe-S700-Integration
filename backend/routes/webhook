@@ -1,4 +1,3 @@
-// routes/webhook.js
 const express = require("express");
 const axios = require("axios");
 const Stripe = require("stripe");
@@ -60,6 +59,7 @@ router.post(
 
         const readerId = metadata.stripe_reader_id;
 
+        // Ignore online Checkout PaymentIntents here.
         if (!readerId) {
           console.log(
             `ℹ️ PaymentIntent ${pi.id} has no stripe_reader_id - skipping terminal flow.`
@@ -75,6 +75,7 @@ router.post(
 
           const amountString = (pi.amount / 100).toFixed(2);
 
+          // RECORD PAYMENT IMMEDIATELY IN SYNCRO
           if (syncroInvoiceId && syncroCustomerId) {
             await recordSyncroPayment(
               syncroInvoiceId,
