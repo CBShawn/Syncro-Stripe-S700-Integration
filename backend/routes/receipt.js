@@ -8,124 +8,278 @@ router.get("/:invoiceId", async (req, res) => {
   const syncroSubdomain = process.env.SYNCRO_SUBDOMAIN;
   const syncroApiKey = process.env.SYNCRO_API_KEY;
 
-  try {
-    const response = await axios.get(
-      `https://${syncroSubdomain}.syncromsp.com/api/v1/invoices/${invoiceId}?api_key=${syncroApiKey}`
-    );
-    const invoice = response.data?.invoice || {};
+  if (!syncroSubdomain || !syncroApiKey) {
+    return res.status(500).send("Missing Syncro API credentials.");
+  }
 
+  try {
+    // 1. Fetch live invoice data from Syncro
+    const response = await axios.get(
+      `https://${syncroSubdomain}.syncromsp.com/api/v1/invoices/${invoiceId}?api_key=${syncroApiKey}`,
+      { timeout: 8000 }
+    );
+
+    const invoice = response.data?.invoice;
+    if (!invoice) {
+      return res.status(404).send("Invoice not found.");
+    }
+
+    // Customer & Account Data
+    const customer = invoice.customer || {};
     const customerName =
       invoice.customer_business_then_name ||
-      invoice.customer?.business_name ||
-      invoice.customer?.fullname ||
+      customer.business_name ||
+      customer.fullname ||
+      `${customer.firstname || ""} ${customer.lastname || ""}`.trim() ||
       "Valued Customer";
 
-    const lineItems = invoice.line_items || [];
-    const dateFormatted = new Date().toLocaleDateString("en-US", {
+    const customerAddress = customer.address || "";
+    const customerAddress2 = customer.address_2 || "";
+    const customerCity = customer.city || "";
+    const customerState = customer.state || "";
+    const customerZip = customer.zip || "";
+    const customerPhone = customer.phone || customer.mobile || "";
+
+    // Financial Values
+    const subtotal = `$${parseFloat(invoice.subtotal || 0).toFixed(2)}`;
+    const tax = `$${parseFloat(invoice.tax || 0).toFixed(2)}`;
+    const total = `$${parseFloat(invoice.total || 0).toFixed(2)}`;
+    const balanceDue = `$${parseFloat(invoice.balance_due || 0).toFixed(2)}`;
+    const paymentsAmount = `$${(parseFloat(invoice.total || 0) - parseFloat(invoice.balance_due || 0)).toFixed(2)}`;
+    const dateFormatted = invoice.date || new Date().toLocaleDateString("en-US", {
       timeZone: "America/New_York",
       year: "numeric",
       month: "short",
       day: "numeric",
     });
 
+    const isPaid = invoice.paid || parseFloat(invoice.balance_due || 0) === 0;
+    const paidStamp = isPaid 
+      ? `<div style="border: 2px solid #000; font-weight: 900; padding: 2px 6px; font-size: 14px; text-transform: uppercase; margin-bottom: 4px; display: inline-block;">PAID</div>` 
+      : "";
+
+    // Render Line Items Table rows
+    const lineItems = invoice.line_items || [];
+    const lineItemsHtml = lineItems.map((item) => `
+      <tr>
+        <td class="first item"><strong>${item.name || "Item"}</strong></td>
+        <td class="description">${item.description || ""}</td>
+        <td class="unitcost">$${parseFloat(item.price || 0).toFixed(2)}</td>
+        <td class="quantity">${item.quantity || 1}</td>
+        <td class="last linetotal">$${parseFloat(item.total || 0).toFixed(2)}</td>
+      </tr>
+    `).join("");
+
+    // Render 80mm-Adapted HTML
     const html = `
-<!DOCTYPE html>
-<html>
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Transitional//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-transitional.dtd">
+<html xmlns="http://www.w3.org/1999/xhtml">
 <head>
-  <meta charset="utf-8">
-  <title>Receipt - Invoice #${invoice.number || invoice.id}</title>
-  <style>
+  <meta http-equiv="Content-type" content="text/html; charset=utf-8"/>
+  <title>Invoice #${invoice.number || invoice.id}</title>
+  <style type="text/css">
     @page {
       size: 80mm auto;
       margin: 0;
     }
-    * {
+    *, *:before, *:after {
       box-sizing: border-box;
       -webkit-print-color-adjust: exact;
       print-color-adjust: exact;
     }
-    body {
+    html, body {
       width: 72mm;
       margin: 0 auto;
-      padding: 6mm 1mm 12mm 1mm;
-      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Arial, monospace;
-      font-size: 13px;
-      font-weight: 700;
-      line-height: 1.35;
+      padding: 4mm 1mm 10mm 1mm;
+      font-family: Arial, "Arial Unicode", "Arial Unicode MS", Helvetica, sans-serif;
+      font-size: 11px;
+      line-height: 14px;
+      word-wrap: break-word;
       color: #000;
       background: #fff;
     }
+
+    .print-container {
+      width: 100%;
+      clear: both;
+    }
+
     .center { text-align: center; }
     .right { text-align: right; }
     .left { text-align: left; }
-    .bold { font-weight: 900; }
-    
-    .brand-title {
-      font-size: 20px;
-      font-weight: 900;
-      text-transform: uppercase;
-      margin-bottom: 2px;
+    .bold { font-weight: bold; }
+
+    .invheader {
+      width: 100%;
+      margin-bottom: 8px;
     }
-    .brand-sub {
+
+    .invheader-upper {
+      width: 100%;
+      margin-bottom: 8px;
+      border-bottom: 1px dashed #000;
+      padding-bottom: 6px;
+    }
+
+    .invheader-address-account {
       font-size: 11px;
-      font-weight: 600;
-      margin-bottom: 2px;
+      line-height: 14px;
+      margin-bottom: 6px;
     }
 
-    .divider-dash {
-      border-top: 1.5px dashed #000;
-      margin: 6px 0;
-      width: 100%;
-    }
-    .divider-solid {
-      border-top: 2px solid #000;
-      margin: 6px 0;
-      width: 100%;
+    .invheader-logo-container {
+      text-align: center;
+      margin: 4px 0;
     }
 
-    table {
+    .invheader-logo img {
+      max-height: 50px;
+      max-width: 180px;
+    }
+
+    .invheader-lower {
+      width: 100%;
+      margin-top: 4px;
+      margin-bottom: 8px;
+    }
+
+    .invheader-address-client {
+      font-size: 11px;
+      line-height: 14px;
+      margin-bottom: 6px;
+    }
+
+    .invheader-invoicedetails {
+      width: 100%;
+      margin-top: 6px;
+    }
+
+    .invheader-invoicedetails table {
       width: 100%;
       border-collapse: collapse;
     }
-    .meta-table td {
+
+    .invheader-invoicedetails table th {
+      width: 50%;
+      font-weight: normal;
+      text-align: left;
+      font-size: 11px;
       padding: 2px 0;
-      font-size: 12px;
+    }
+
+    .invheader-invoicedetails table td {
+      text-align: right;
+      font-size: 11px;
+      padding: 2px 0;
+    }
+
+    .invheader-invoicedetails-balance th,
+    .invheader-invoicedetails-balance td {
+      background-color: #e5e5e5;
+      border-top: solid 1px #000;
+      border-bottom: solid 1px #000;
+      font-weight: bold;
+      padding: 4px 2px !important;
+    }
+
+    /* ITEMS TABLE */
+    .invbody {
+      width: 100%;
+      clear: both;
+    }
+
+    .invbody-items {
+      width: 100%;
+      border-collapse: collapse;
+      margin-top: 6px;
+      margin-bottom: 8px;
+    }
+
+    .invbody-items th {
+      background-color: #e3e3e3;
+      border-top: solid 1px #000;
+      border-bottom: solid 1px #000;
+      font-size: 9.5px;
+      text-transform: uppercase;
+      padding: 3px 1px;
+      text-align: left;
+    }
+
+    .invbody-items td {
+      padding: 4px 1px;
+      border-bottom: solid 1px #e5e5e5;
+      font-size: 10px;
       vertical-align: top;
     }
 
-    .items-table th {
-      border-bottom: 1.5px solid #000;
-      padding: 4px 0;
+    .invbody-items .unitcost,
+    .invbody-items .quantity,
+    .invbody-items .linetotal {
+      text-align: right;
+    }
+
+    /* SUMMARY TABLE */
+    .invbody-summary {
+      width: 100%;
+      margin-top: 6px;
+      border-top: solid 2px #000;
+      padding-top: 4px;
+    }
+
+    .invbody-summary table {
+      width: 100%;
+      border-collapse: collapse;
+    }
+
+    .invbody-summary th {
+      font-weight: normal;
+      text-align: left;
       font-size: 11px;
-      font-weight: 900;
+      padding: 2px 0;
+    }
+
+    .invbody-summary td {
+      text-align: right;
+      font-size: 11px;
+      padding: 2px 0;
+    }
+
+    .invbody-summary-total th,
+    .invbody-summary-total td {
+      background-color: #e5e5e5;
+      border-top: solid 1px #000;
+      border-bottom: solid 1px #000;
+      font-weight: bold;
+      padding: 4px 2px !important;
+      font-size: 12px;
+    }
+
+    .disclaimer-sec {
+      margin-top: 10px;
+      border-top: 1px dashed #000;
+      padding-top: 6px;
+    }
+
+    .disclaimer-sec h2 {
+      font-size: 11px;
+      margin: 0 0 2px 0;
       text-transform: uppercase;
     }
-    .items-table td {
-      padding: 4px 0;
-      vertical-align: top;
-      font-size: 12px;
+
+    .disclaimer-sec p {
+      font-size: 9px;
+      line-height: 12px;
+      margin: 0;
     }
 
-    .totals-table {
-      margin-top: 4px;
-      font-size: 13px;
-    }
-    .totals-table td {
-      padding: 2px 0;
-    }
-    .grand-total {
-      font-size: 16px;
-      font-weight: 900;
-      border-top: 2px solid #000;
-      border-bottom: 2px solid #000;
-      padding: 5px 0 !important;
+    .barcode-container {
+      text-align: center;
+      padding: 10px 0;
     }
 
-    .footer {
-      font-size: 10px;
-      font-weight: 600;
-      margin-top: 8px;
-      line-height: 1.25;
+    .barcode-container img {
+      max-width: 100%;
+      height: 35px;
     }
 
     @media print {
@@ -134,82 +288,114 @@ router.get("/:invoiceId", async (req, res) => {
   </style>
 </head>
 <body onload="window.print()">
+<div class="print-container">
 
-  <div class="center brand-title">CodeBlackIT</div>
-  <div class="center brand-sub">Computer Services & IT Support</div>
-  <div class="center brand-sub">Winter Park, FL</div>
+  <div class="invheader">
+    <div class="invheader-upper">
+      <div class="invheader-logo-container">
+        ${paidStamp}
+        <div class="invheader-logo">
+          <div style="font-size: 16px; font-weight: 900; text-transform: uppercase;">CodeBlackIT</div>
+          <div style="font-size: 10px;">Computer Services & IT Support</div>
+        </div>
+      </div>
 
-  <div class="divider-dash"></div>
+      <div class="invheader-address-account center">
+        Winter Park, FL<br />
+        codeblackit.com
+      </div>
+    </div>
 
-  <table class="meta-table">
-    <tr>
-      <td class="bold left">Invoice #: ${invoice.number || invoice.id}</td>
-      <td class="right">${dateFormatted}</td>
-    </tr>
-    <tr>
-      <td colspan="2" class="left"><strong>Customer:</strong> ${customerName}</td>
-    </tr>
-  </table>
+    <div class="invheader-lower">
+      <div class="invheader-address-client">
+        <strong>Customer:</strong><br />
+        ${customerName}<br />
+        ${customerAddress ? `${customerAddress}<br />` : ""}
+        ${customerAddress2 ? `${customerAddress2}<br />` : ""}
+        ${customerCity ? `${customerCity}, ` : ""}${customerState} ${customerZip}
+      </div>
 
-  <div class="divider-solid"></div>
-
-  <table class="items-table">
-    <thead>
-      <tr>
-        <th class="left" style="width: 55%;">Item</th>
-        <th class="center" style="width: 15%;">Qty</th>
-        <th class="right" style="width: 30%;">Total</th>
-      </tr>
-    </thead>
-    <tbody>
-      ${lineItems.map(item => `
-        <tr>
-          <td class="left bold">${item.name || item.item || "Service"}</td>
-          <td class="center bold">${item.quantity || 1}</td>
-          <td class="right bold">$${parseFloat(item.total || 0).toFixed(2)}</td>
-        </tr>
-      `).join("")}
-    </tbody>
-  </table>
-
-  <div class="divider-dash"></div>
-
-  <table class="totals-table">
-    <tr>
-      <td class="left">Subtotal:</td>
-      <td class="right">$${parseFloat(invoice.subtotal || 0).toFixed(2)}</td>
-    </tr>
-    ${parseFloat(invoice.tax || 0) > 0 ? `
-      <tr>
-        <td class="left">Tax:</td>
-        <td class="right">$${parseFloat(invoice.tax).toFixed(2)}</td>
-      </tr>
-    ` : ""}
-    <tr class="grand-total">
-      <td class="left">TOTAL DUE:</td>
-      <td class="right">$${parseFloat(invoice.total || 0).toFixed(2)}</td>
-    </tr>
-    ${invoice.paid || parseFloat(invoice.balance_due) === 0 ? `
-      <tr>
-        <td class="left bold" style="padding-top: 4px;">Status:</td>
-        <td class="right bold" style="padding-top: 4px;">PAID IN FULL</td>
-      </tr>
-    ` : `
-      <tr class="bold">
-        <td class="left" style="padding-top: 4px;">Balance Due:</td>
-        <td class="right" style="padding-top: 4px;">$${parseFloat(invoice.balance_due || 0).toFixed(2)}</td>
-      </tr>
-    `}
-  </table>
-
-  <div class="divider-dash"></div>
-
-  <div class="center bold" style="font-size: 12px;">THANK YOU FOR YOUR BUSINESS!</div>
-  <div class="center footer">
-    Hardware warranty & service policy apply.<br>
-    codeblackit.com
+      <div class="invheader-invoicedetails">
+        <table cellspacing="0">
+          <tbody>
+            <tr>
+              <th>Invoice #</th>
+              <td>${invoice.number || invoice.id}</td>
+            </tr>
+            <tr>
+              <th>Invoice Date</th>
+              <td>${dateFormatted}</td>
+            </tr>
+            <tr class="invheader-invoicedetails-balance">
+              <th>Balance Due</th>
+              <td>${balanceDue}</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
   </div>
 
+  <div class="invbody">
+    <table cellspacing="0" class="invbody-items">
+      <thead>
+        <tr>
+          <th class="first" style="width: 35%;">Item</th>
+          <th style="width: 25%;">Desc</th>
+          <th class="unitcost" style="width: 15%;">Cost</th>
+          <th class="quantity" style="width: 10%;">Qty</th>
+          <th class="last linetotal" style="width: 15%;">Total</th>
+        </tr>
+      </thead>
+      <tbody>
+        ${lineItemsHtml}
+      </tbody>
+    </table>
+
+    <div class="invbody-summary">
+      <div class="invheader-invoicedetails">
+        <table cellspacing="0">
+          <tbody>
+            <tr>
+              <th><strong>Subtotal</strong></th>
+              <td><strong>${subtotal}</strong></td>
+            </tr>
+            ${parseFloat(invoice.tax || 0) > 0 ? `
+              <tr>
+                <th>Tax</th>
+                <td>${tax}</td>
+              </tr>
+            ` : ""}
+            <tr>
+              <th>Invoice Total</th>
+              <td>${total}</td>
+            </tr>
+            <tr>
+              <th>Payments</th>
+              <td>${paymentsAmount}</td>
+            </tr>
+            <tr class="invbody-summary-total">
+              <th><strong>Balance Due</strong></th>
+              <td><strong>${balanceDue}</strong></td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+
+      <div class="disclaimer-sec">
+        <h2>Disclaimer</h2>
+        <p>Hardware warranty and service policy apply. All claims must be accompanied by receipt. Work accepted and payment acknowledged.</p>
+      </div>
+    </div>
+  </div>
+
+  ${customerPhone ? `
+    <div class="barcode-container">
+      <img src="https://barcode.services.syncromsp.com/barcodes/${encodeURIComponent(customerPhone)}.png" alt="Barcode" />
+    </div>
+  ` : ""}
+
+</div>
 </body>
 </html>
     `;
@@ -218,8 +404,8 @@ router.get("/:invoiceId", async (req, res) => {
     res.send(html);
 
   } catch (err) {
-    console.error("❌ Receipt error:", err.message);
-    res.status(500).send("Error generating receipt.");
+    console.error("❌ Receipt generation failed:", err.message);
+    res.status(500).send(`Failed to generate receipt: ${err.message}`);
   }
 });
 
