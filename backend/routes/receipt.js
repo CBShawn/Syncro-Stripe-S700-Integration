@@ -8,6 +8,7 @@ router.get("/:invoiceId", async (req, res) => {
   const syncroSubdomain = process.env.SYNCRO_SUBDOMAIN;
   const syncroApiKey = process.env.SYNCRO_API_KEY;
   
+  // Exact CodeBlackIT Logo URL
   const LOGO_URL = process.env.RECEIPT_LOGO_URL || "https://codeblackit.com/wp-content/uploads/2018/05/RepairShopr-Logo.jpg";
 
   if (!syncroSubdomain || !syncroApiKey) {
@@ -57,25 +58,55 @@ router.get("/:invoiceId", async (req, res) => {
 
     const isPaid = invoice.paid || parseFloat(invoice.balance_due || 0) === 0;
     const paidStamp = isPaid 
-      ? `<div style="border: 2px solid #000; font-weight: 900; padding: 2px 8px; font-size: 14px; text-transform: uppercase; margin-bottom: 6px; display: inline-block;">PAID IN FULL</div>` 
+      ? `<div style="border: 2px solid #000; font-weight: 900; padding: 2px 8px; font-size: 13px; text-transform: uppercase; margin-bottom: 6px; display: inline-block;">PAID IN FULL</div>` 
       : "";
 
-    // 2. Locate Signature (Invoice level or Payment level)
+    // 2. Fetch Payment Signature (Check Invoice -> Attached Payments -> Linked Payment API)
     let signatureUrl = 
       invoice.signature_image || 
       invoice.signature_url || 
       invoice.signature_data ||
       null;
 
-    // If not directly on invoice, check payments attached
-    if (!signatureUrl && Array.isArray(invoice.payments) && invoice.payments.length > 0) {
-      const signedPayment = invoice.payments.find(p => p.signature_image || p.signature_url);
-      if (signedPayment) {
-        signatureUrl = signedPayment.signature_image || signedPayment.signature_url;
+    if (!signatureUrl) {
+      let paymentId = null;
+      if (Array.isArray(invoice.payments) && invoice.payments.length > 0) {
+        const signedPayment = invoice.payments.find(p => p.signature_image || p.signature_url || p.signature_data || p.signature);
+        if (signedPayment) {
+          signatureUrl = signedPayment.signature_image || signedPayment.signature_url || signedPayment.signature_data || signedPayment.signature;
+        } else {
+          paymentId = invoice.payments[0].id || invoice.payments[0].payment_id;
+        }
+      } else if (Array.isArray(invoice.payment_ids) && invoice.payment_ids.length > 0) {
+        paymentId = invoice.payment_ids[0];
+      }
+
+      // If still missing, query the Payment endpoint directly
+      if (!signatureUrl && paymentId) {
+        try {
+          const paymentRes = await axios.get(
+            `https://${syncroSubdomain}.syncromsp.com/api/v1/payments/${paymentId}?api_key=${syncroApiKey}`,
+            { timeout: 5000 }
+          );
+          const paymentData = paymentRes.data?.payment || {};
+          signatureUrl = 
+            paymentData.signature_image || 
+            paymentData.signature_url || 
+            paymentData.signature_data || 
+            paymentData.signature || 
+            null;
+        } catch (payErr) {
+          console.warn("⚠️ Could not fetch payment signature:", payErr.message);
+        }
       }
     }
 
-    // Render Line Items Table rows
+    // Format Base64 signature prefix if raw
+    if (signatureUrl && !signatureUrl.startsWith("data:") && !signatureUrl.startsWith("http")) {
+      signatureUrl = `data:image/bmp;base64,${signatureUrl}`;
+    }
+
+    // 3. Render Line Items Table Rows
     const lineItems = invoice.line_items || [];
     const lineItemsHtml = lineItems.map((item) => `
       <tr>
@@ -87,12 +118,13 @@ router.get("/:invoiceId", async (req, res) => {
       </tr>
     `).join("");
 
+    // 4. Generate Complete 80mm HTML Template
     const html = `
 <!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Transitional//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-transitional.dtd">
 <html xmlns="http://www.w3.org/1999/xhtml">
 <head>
   <meta http-equiv="Content-type" content="text/html; charset=utf-8"/>
-  <title>Invoice #${invoice.number || invoice.id}</title>
+  <title>Receipt - Invoice #${invoice.number || invoice.id}</title>
   <style type="text/css">
     @page {
       size: 80mm auto;
@@ -139,13 +171,14 @@ router.get("/:invoiceId", async (req, res) => {
     }
 
     .invheader-logo img {
-      max-height: 55px;
-      max-width: 200px;
+      max-height: 60px;
+      max-width: 210px;
       height: auto;
       width: auto;
       display: block;
       margin: 0 auto 4px auto;
-      filter: grayscale(100%) contrast(150%);
+      background: #ffffff;
+      filter: grayscale(100%) contrast(160%);
     }
 
     .invheader-address-account {
@@ -298,8 +331,10 @@ router.get("/:invoiceId", async (req, res) => {
 
     .signature-container img {
       max-width: 220px;
-      max-height: 65px;
+      max-height: 70px;
+      width: auto;
       height: auto;
+      background: #ffffff;
       filter: grayscale(100%) contrast(200%);
       display: block;
       margin: 0 auto 4px auto;
@@ -311,6 +346,7 @@ router.get("/:invoiceId", async (req, res) => {
       padding-top: 2px;
       font-size: 10px;
       text-align: center;
+      font-weight: bold;
     }
 
     .barcode-container {
@@ -430,7 +466,7 @@ router.get("/:invoiceId", async (req, res) => {
       <!-- Customer Signature Section -->
       <div class="signature-container">
         ${signatureUrl ? `
-          <img src="${signatureUrl}" alt="Customer Signature" />
+          <img src="${signatureUrl}" alt="Customer Signature" onerror="this.style.display='none'" />
           <div class="signature-line">Customer Signature</div>
         ` : `
           <div style="height: 35px;"></div>
