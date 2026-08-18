@@ -7,6 +7,8 @@ router.get("/:invoiceId", async (req, res) => {
   const { invoiceId } = req.params;
   const syncroSubdomain = process.env.SYNCRO_SUBDOMAIN;
   const syncroApiKey = process.env.SYNCRO_API_KEY;
+  
+  const LOGO_URL = process.env.RECEIPT_LOGO_URL || "https://codeblackit.com/wp-content/uploads/2023/06/logo.png";
 
   if (!syncroSubdomain || !syncroApiKey) {
     return res.status(500).send("Missing Syncro API credentials.");
@@ -55,8 +57,23 @@ router.get("/:invoiceId", async (req, res) => {
 
     const isPaid = invoice.paid || parseFloat(invoice.balance_due || 0) === 0;
     const paidStamp = isPaid 
-      ? `<div style="border: 2px solid #000; font-weight: 900; padding: 2px 6px; font-size: 14px; text-transform: uppercase; margin-bottom: 4px; display: inline-block;">PAID</div>` 
+      ? `<div style="border: 2px solid #000; font-weight: 900; padding: 2px 8px; font-size: 14px; text-transform: uppercase; margin-bottom: 6px; display: inline-block;">PAID IN FULL</div>` 
       : "";
+
+    // 2. Locate Signature (Invoice level or Payment level)
+    let signatureUrl = 
+      invoice.signature_image || 
+      invoice.signature_url || 
+      invoice.signature_data ||
+      null;
+
+    // If not directly on invoice, check payments attached
+    if (!signatureUrl && Array.isArray(invoice.payments) && invoice.payments.length > 0) {
+      const signedPayment = invoice.payments.find(p => p.signature_image || p.signature_url);
+      if (signedPayment) {
+        signatureUrl = signedPayment.signature_image || signedPayment.signature_url;
+      }
+    }
 
     // Render Line Items Table rows
     const lineItems = invoice.line_items || [];
@@ -70,7 +87,6 @@ router.get("/:invoiceId", async (req, res) => {
       </tr>
     `).join("");
 
-    // Render 80mm-Adapted HTML
     const html = `
 <!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Transitional//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-transitional.dtd">
 <html xmlns="http://www.w3.org/1999/xhtml">
@@ -119,22 +135,23 @@ router.get("/:invoiceId", async (req, res) => {
       margin-bottom: 8px;
       border-bottom: 1px dashed #000;
       padding-bottom: 6px;
+      text-align: center;
+    }
+
+    .invheader-logo img {
+      max-height: 55px;
+      max-width: 200px;
+      height: auto;
+      width: auto;
+      display: block;
+      margin: 0 auto 4px auto;
+      filter: grayscale(100%) contrast(150%);
     }
 
     .invheader-address-account {
       font-size: 11px;
       line-height: 14px;
-      margin-bottom: 6px;
-    }
-
-    .invheader-logo-container {
-      text-align: center;
-      margin: 4px 0;
-    }
-
-    .invheader-logo img {
-      max-height: 50px;
-      max-width: 180px;
+      margin-top: 4px;
     }
 
     .invheader-lower {
@@ -272,6 +289,30 @@ router.get("/:invoiceId", async (req, res) => {
       margin: 0;
     }
 
+    /* SIGNATURE BLOCK */
+    .signature-container {
+      margin-top: 12px;
+      text-align: center;
+      width: 100%;
+    }
+
+    .signature-container img {
+      max-width: 220px;
+      max-height: 65px;
+      height: auto;
+      filter: grayscale(100%) contrast(200%);
+      display: block;
+      margin: 0 auto 4px auto;
+    }
+
+    .signature-line {
+      border-top: 1px solid #000;
+      margin-top: 2px;
+      padding-top: 2px;
+      font-size: 10px;
+      text-align: center;
+    }
+
     .barcode-container {
       text-align: center;
       padding: 10px 0;
@@ -292,15 +333,14 @@ router.get("/:invoiceId", async (req, res) => {
 
   <div class="invheader">
     <div class="invheader-upper">
-      <div class="invheader-logo-container">
-        ${paidStamp}
-        <div class="invheader-logo">
-          <div style="font-size: 16px; font-weight: 900; text-transform: uppercase;">CodeBlackIT</div>
-          <div style="font-size: 10px;">Computer Services & IT Support</div>
-        </div>
+      <div class="invheader-logo">
+        <img src="${LOGO_URL}" alt="CodeBlackIT Logo" onerror="this.style.display='none'" />
       </div>
 
-      <div class="invheader-address-account center">
+      ${paidStamp}
+
+      <div class="invheader-address-account">
+        <strong>CodeBlackIT</strong><br />
         Winter Park, FL<br />
         codeblackit.com
       </div>
@@ -386,6 +426,18 @@ router.get("/:invoiceId", async (req, res) => {
         <h2>Disclaimer</h2>
         <p>Hardware warranty and service policy apply. All claims must be accompanied by receipt. Work accepted and payment acknowledged.</p>
       </div>
+
+      <!-- Customer Signature Section -->
+      <div class="signature-container">
+        ${signatureUrl ? `
+          <img src="${signatureUrl}" alt="Customer Signature" />
+          <div class="signature-line">Customer Signature</div>
+        ` : `
+          <div style="height: 35px;"></div>
+          <div class="signature-line">Customer Signature</div>
+        `}
+      </div>
+
     </div>
   </div>
 
