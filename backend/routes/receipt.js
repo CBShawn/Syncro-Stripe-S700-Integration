@@ -8,7 +8,7 @@ router.get("/:invoiceId", async (req, res) => {
   const syncroSubdomain = process.env.SYNCRO_SUBDOMAIN;
   const syncroApiKey = process.env.SYNCRO_API_KEY;
   
-  const LOGO_URL = process.env.RECEIPT_LOGO_URL || "https://codeblackit.com/wp-content/uploads/2023/06/logo.png";
+  const LOGO_URL = process.env.RECEIPT_LOGO_URL || "https://codeblackit.com/wp-content/uploads/2018/05/RepairShopr-Logo.jpg";
 
   if (!syncroSubdomain || !syncroApiKey) {
     return res.status(500).send("Missing Syncro API credentials.");
