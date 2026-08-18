@@ -11,7 +11,7 @@ const stripe = new Stripe(process.env.STRIPE_SECRET_KEY, {
 });
 
 router.post("/send-payment-email", async (req, res) => {
-  console.log("➡️ [1/4] send-payment-email endpoint reached!");
+  console.log("➡️ [1/5] send-payment-email endpoint reached!");
 
   try {
     // 1. Authenticate Extension Request
@@ -22,7 +22,7 @@ router.post("/send-payment-email", async (req, res) => {
     }
 
     const { invoiceId, amount, customerId } = req.body || {};
-    console.log(`➡️ [2/4] Payload received - Invoice ID: ${invoiceId}, Amount: ${amount}`);
+    console.log(`➡️ [2/5] Payload received - Invoice ID: ${invoiceId}, Amount: ${amount}`);
 
     if (!invoiceId) {
       return res.status(400).json({ success: false, error: "Missing invoiceId." });
@@ -32,7 +32,7 @@ router.post("/send-payment-email", async (req, res) => {
     const syncroSubdomain = process.env.SYNCRO_SUBDOMAIN;
     const syncroApiKey = process.env.SYNCRO_API_KEY;
 
-    console.log(`➡️ [3/4] Fetching Syncro Invoice #${invoiceId}...`);
+    console.log(`➡️ [3/5] Fetching Syncro Invoice #${invoiceId}...`);
     const syncroRes = await axios.get(
       `https://${syncroSubdomain}.syncromsp.com/api/v1/invoices/${invoiceId}?api_key=${syncroApiKey}`,
       { timeout: 8000 }
@@ -72,8 +72,8 @@ router.post("/send-payment-email", async (req, res) => {
 
     const amountInCents = Math.round((invoice.balance_due || amount) * 100);
 
-    // 3. Create Stripe Checkout Session (Card + ACH)
-    console.log(`➡️ [4/4] Creating Stripe Checkout Session ($${(amountInCents / 100).toFixed(2)})...`);
+    // 3. Create Stripe Checkout Session (Cards + ACH Direct Debit)
+    console.log(`➡️ [4/5] Creating Stripe Checkout Session ($${(amountInCents / 100).toFixed(2)})...`);
     const session = await stripe.checkout.sessions.create({
       payment_method_types: ["card", "us_bank_account"],
       payment_method_options: {
@@ -106,20 +106,19 @@ router.post("/send-payment-email", async (req, res) => {
 
     console.log(`➡️ Stripe Session created: ${session.id}`);
 
-    // 4. Dispatch Email Directly Through Syncro's Invoice Mailer Endpoint
-    // Passing both 'body' and 'comment' ensures {{invoice_comment}} populates
-    // and Syncro records the entry directly in the Invoice's history log.
-    const customMessage = `Pay Online (Credit Card or Direct ACH Bank Transfer):\n${session.url}`;
+    // 4. Build the custom invoice message
+    const customInvoiceMessage = `Pay Online (Credit Card or Direct ACH Bank Transfer):\n${session.url}`;
 
-    console.log(`➡️ Dispatching via Syncro Invoice Mailer for Invoice #${invoice.id}...`);
+    // 5. Send & Log via Syncro's Native Invoice Mailer API
+    console.log(`➡️ [5/5] Dispatching via Syncro Invoice Mailer using custom_invoice_message...`);
     await axios.post(
       `https://${syncroSubdomain}.syncromsp.com/api/v1/invoices/${invoice.id}/email?api_key=${syncroApiKey}`,
       {
         email: customerEmail,
         subject: `Invoice #${invoice.number || invoice.id} from CodeBlackIT`,
-        body: customMessage,
-        comment: customMessage,
-        email_body: customMessage,
+        custom_invoice_message: customInvoiceMessage,
+        message: customInvoiceMessage,
+        comment: customInvoiceMessage,
       },
       {
         headers: { "Content-Type": "application/json" },
@@ -127,7 +126,7 @@ router.post("/send-payment-email", async (req, res) => {
       }
     );
 
-    console.log(`✅ Email dispatched and logged directly under Invoice #${invoice.id}!`);
+    console.log(`✅ Email dispatched and logged directly into Invoice #${invoice.id} history!`);
 
     return res.json({
       success: true,
