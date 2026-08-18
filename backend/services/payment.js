@@ -1,15 +1,7 @@
-// services/payment.js
 const axios = require("axios");
 
 /**
  * Records a payment against an invoice in Syncro MSP.
- * 
- * @param {string|number} invoiceId - Syncro Invoice ID
- * @param {string|number} customerId - Syncro Customer ID
- * @param {string|number} amount - Amount in dollars (e.g. "150.00")
- * @param {string} paymentIntentId - Stripe PaymentIntent or Checkout Session ID
- * @param {string|null} signatureUrl - Optional signature URL
- * @param {string|null} fileId - Optional Stripe signature file ID
  */
 async function recordSyncroPayment(
   invoiceId,
@@ -26,10 +18,13 @@ async function recordSyncroPayment(
     throw new Error("Missing SYNCRO_SUBDOMAIN or SYNCRO_API_KEY environment variables.");
   }
 
+  const amountCents = Math.round(Number(amount) * 100);
+
   const paymentPayload = {
     customer_id: Number(customerId),
     invoice_id: Number(invoiceId),
     amount: Number(amount),
+    amount_cents: amountCents,
     applied_at: new Date().toISOString(),
     notes: `Stripe Payment (ID: ${paymentIntentId})`,
   };
