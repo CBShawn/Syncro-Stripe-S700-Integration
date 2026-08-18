@@ -49,9 +49,9 @@ router.post("/send-payment-email", async (req, res) => {
       return res.status(400).json({ success: false, error: "Invoice is already paid or has no balance due." });
     }
 
-    // Resolve Customer Email & ID directly from Syncro Invoice
-    const targetCustomerId = invoice.customer_id || customerId || invoice.customer?.id;
+    // Resolve Customer Email & ID
     let customerEmail = invoice.customer_email || invoice.customer?.email;
+    let targetCustomerId = customerId || invoice.customer_id || invoice.customer?.id;
 
     if (!customerEmail && targetCustomerId) {
       try {
@@ -72,7 +72,7 @@ router.post("/send-payment-email", async (req, res) => {
 
     const amountInCents = Math.round((invoice.balance_due || amount) * 100);
 
-    // 3. Create Stripe Checkout Session (Cards + ACH)
+    // 3. Create Stripe Checkout Session (Cards + ACH Direct Debit)
     console.log(`➡️ [4/5] Creating Stripe Checkout Session ($${(amountInCents / 100).toFixed(2)})...`);
     const session = await stripe.checkout.sessions.create({
       payment_method_types: ["card", "us_bank_account"],
@@ -98,18 +98,18 @@ router.post("/send-payment-email", async (req, res) => {
       customer_email: customerEmail,
       metadata: {
         syncro_invoice_id: String(invoice.id),
-        syncro_customer_id: String(targetCustomerId),
+        syncro_customer_id: String(targetCustomerId || ""),
       },
       success_url: `https://${syncroSubdomain}.syncromsp.com/invoices/${invoice.id}?payment=success`,
       cancel_url: `https://${syncroSubdomain}.syncromsp.com/invoices/${invoice.id}?payment=cancelled`,
     });
 
-    console.log(`➡️ Stripe Session created: ${session.id} with Customer ID: ${targetCustomerId}`);
+    console.log(`➡️ Stripe Session created: ${session.id}`);
 
-    // 4. Set the Stripe URL as the custom message
+    // 4. Pass the raw Stripe URL directly
     const customInvoiceMessage = session.url;
 
-    // 5. Send & Log via Syncro Native Mailer
+    // 5. Send & Log via Syncro's Native Invoice Mailer API
     console.log(`➡️ [5/5] Dispatching via Syncro Invoice Mailer...`);
     await axios.post(
       `https://${syncroSubdomain}.syncromsp.com/api/v1/invoices/${invoice.id}/email?api_key=${syncroApiKey}`,
