@@ -10,7 +10,6 @@ const axios = require("axios");
  * @param {string} paymentIntentId - Stripe PaymentIntent or Checkout Session ID
  * @param {string|null} signatureUrl - Optional signature URL
  * @param {string|null} fileId - Optional Stripe signature file ID
- * @param {string} paymentMethod - Syncro Payment Method ("Terminal" or "Web")
  */
 async function recordSyncroPayment(
   invoiceId,
@@ -31,7 +30,6 @@ async function recordSyncroPayment(
     customer_id: Number(customerId),
     invoice_id: Number(invoiceId),
     amount: Number(amount),
-    payment_method: paymentMethod, // Stamped as "Terminal" or "Web"
     applied_at: new Date().toISOString(),
     notes: `Stripe Payment (ID: ${paymentIntentId})`,
   };
@@ -59,7 +57,6 @@ async function clearTerminalReaderDisplay(readerId) {
     await stripe.terminal.readers.cancelAction(readerId);
     console.log(`🧹 Reader display reset for ${readerId}`);
   } catch (err) {
-    // Ignore error if there was no active action to cancel
     console.log(`ℹ️ Reader display reset notice for ${readerId}: ${err.message}`);
   }
 }
