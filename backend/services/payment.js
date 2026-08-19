@@ -113,7 +113,10 @@ async function recordSyncroPayment(
           stripePaymentIntentId,
           { expand: ["payment_method", "latest_charge", "charges.data"] }
         );
-        latestChargeObj = stripePayment?.latest_charge;
+        latestChargeObj =
+          (typeof stripePayment?.latest_charge === "object" ? stripePayment.latest_charge : null) ||
+          (stripePayment?.charges?.data && stripePayment.charges.data[0]) ||
+          null;
       } catch (stripeErr) {
         console.warn("Stripe lookup warning:", stripeErr.message);
       }
@@ -124,15 +127,18 @@ async function recordSyncroPayment(
     const usBankAccount = stripePayment?.payment_method?.us_bank_account || {};
     const cardInfo = cardPresent.brand ? cardPresent : cardDetails;
 
-    // Resolve client IP
-    const resolvedClientIp =
-      explicitClientIp ||
-      latestChargeObj?.client_ip ||
-      "";
+    // Resolve IP address
+    let resolvedClientIp = explicitClientIp;
+    if (!resolvedClientIp && latestChargeObj?.client_ip) {
+      resolvedClientIp = latestChargeObj.client_ip;
+    }
+    if (!resolvedClientIp || resolvedClientIp === "N/A") {
+      resolvedClientIp = "";
+    }
 
-    // Automatic Method Detection
+    // Determine payment method
     let finalPaymentMethod = overrideMethod;
-    if (!finalPaymentMethod) {
+    if (!finalPaymentMethod || finalPaymentMethod === "N/A") {
       if (cardPresent.brand) {
         finalPaymentMethod = "Stripe Terminal";
       } else {
@@ -194,7 +200,7 @@ async function recordSyncroPayment(
       .join(" | ")
       .substring(0, 255);
 
-    // 6. SYNCRO PAYMENT PAYLOAD WITH NATIVE ip_address FIELD
+    // 6. SYNCRO PAYMENT PAYLOAD
     const payload = {
       payment: {
         customer_id: parsedCustomerId,
