@@ -50,7 +50,8 @@ async function recordSyncroPayment(
   amountString,
   stripePaymentIntentId,
   stripeInvoiceId = null,
-  signatureFileId = null
+  signatureFileId = null,
+  overrideMethod = null
 ) {
   const cleanInvoiceId = String(syncroInvoiceId || "").trim();
   const cleanSigFileId = sanitizeFileId(signatureFileId);
@@ -114,12 +115,25 @@ async function recordSyncroPayment(
 
     const cardPresent = stripePayment?.payment_method?.card_present || {};
     const cardDetails = stripePayment?.payment_method?.card || {};
+    const usBankAccount = stripePayment?.payment_method?.us_bank_account || {};
     const cardInfo = cardPresent.brand ? cardPresent : cardDetails;
+
+    // Automatic Method Detection:
+    // If cardPresent has a brand, it was swiped/dipped on the S700 -> "Stripe Terminal"
+    // Otherwise, it came through online web/email link -> "Stripe Web"
+    let finalPaymentMethod = overrideMethod;
+    if (!finalPaymentMethod) {
+      if (cardPresent.brand) {
+        finalPaymentMethod = "Stripe Terminal";
+      } else {
+        finalPaymentMethod = "Stripe Web";
+      }
+    }
 
     const baseUrl =
       process.env.RENDER_EXTERNAL_URL ||
       process.env.BASE_URL ||
-      `https://syncro-stripe-s700-integration.onrender.com`;
+      `http://localhost:${PORT}`;
 
     // 3. S700 SIGNATURE URL GENERATION
     const signatureUrl = cleanSigFileId
@@ -127,19 +141,20 @@ async function recordSyncroPayment(
       : "";
 
     const sigTag = cleanSigFileId ? ` | Sig: ${signatureUrl}` : "";
-
-    // Appends the signature URL right into ref_num
     const referenceString = `${stripeInvoiceId || stripePaymentIntentId || "Stripe_Payment"}${sigTag}`;
 
     // 4. BUILD NOTES
+    const isTerminal = finalPaymentMethod === "Stripe Terminal";
     const notesstring = [
-      `Stripe Terminal Payment`,
+      isTerminal ? `Stripe Terminal Payment` : `Stripe Online Payment`,
       `PaymentIntent: ${stripePaymentIntentId || "N/A"}`,
       `Charge: ${stripePayment?.latest_charge || "N/A"}`,
-      `Card: ${cardInfo.description || cardInfo.brand || "N/A"}`,
+      usBankAccount.bank_name
+        ? `ACH Bank: ${usBankAccount.bank_name}`
+        : `Card: ${cardInfo.description || cardInfo.brand || "N/A"}`,
       `Card Type: ${cardInfo.brand || "N/A"}`,
       `Cardholder: ${cardInfo.cardholder_name || "N/A"}`,
-      `Last 4: ****${cardInfo.last4 || "N/A"}`,
+      `Last 4: ****${usBankAccount.last4 || cardInfo.last4 || "N/A"}`,
       `Funding: ${cardInfo.funding || "N/A"}`,
       `Issuer: ${cardInfo.issuer || "N/A"}`,
       `Country: ${cardInfo.country || "N/A"}`,
@@ -151,22 +166,18 @@ async function recordSyncroPayment(
       `Currency: ${stripePayment?.currency || "usd"}`,
       `Amount: ${stripePayment?.amount ?? totalCents}`,
       `Amount Received: ${stripePayment?.amount_received ?? totalCents}`,
-      `Signature File: ${cleanSigFileId || "N/A"}`,
-      `Signature URL: ${signatureUrl || "N/A"}`,
-    ].join(" | ");
+      cleanSigFileId ? `Signature File: ${cleanSigFileId}` : null,
+      signatureUrl ? `Signature URL: ${signatureUrl}` : null,
+    ]
+      .filter(Boolean)
+      .join(" | ");
 
     // 5. TRANSACTION RESPONSE
     const transactionresponse = [
-      `Card: ${cardInfo.description || cardInfo.brand || "N/A"}`,
-      `Type: ${cardInfo.brand || "N/A"}`,
-      `Last: ${cardInfo.last4 || "N/A"}`,
-      `Iss: ${cardInfo.issuer || "N/A"}`,
-      `Ctry: ${cardInfo.country || "N/A"}`,
-      `Exp: ${
-        cardInfo.exp_month
-          ? String(cardInfo.exp_month).padStart(2, "0")
-          : "N/A"
-      }/${cardInfo.exp_year || "N/A"}`,
+      `Method: ${finalPaymentMethod}`,
+      usBankAccount.bank_name
+        ? `Bank: ${usBankAccount.bank_name} | Last: ${usBankAccount.last4}`
+        : `Card: ${cardInfo.description || cardInfo.brand || "N/A"} | Last: ${cardInfo.last4 || "N/A"}`,
       `PI: ${stripePaymentIntentId || "N/A"}`,
       `Charge: ${stripePayment?.latest_charge || "N/A"}`,
     ]
@@ -180,7 +191,7 @@ async function recordSyncroPayment(
         invoice_id: parsedInvoiceId,
         amount: amountFloat,
         amount_cents: totalCents,
-        payment_method: "Stripe Terminal",
+        payment_method: finalPaymentMethod,
         ref_num: referenceString,
         notes: notesstring,
         transaction_response: transactionresponse,
@@ -229,7 +240,7 @@ async function recordSyncroPayment(
       stripe_invoice_id: stripeInvoiceId || "",
     });
 
-    console.log(`✅ Syncro Invoice #${cleanInvoiceId} marked PAID ($${amountString}) with Payment ID: ${createdPayment.id}`);
+    console.log(`✅ Syncro Invoice #${cleanInvoiceId} marked PAID ($${amountString}) via ${finalPaymentMethod} (Payment ID: ${createdPayment.id})`);
     return syncroResponse.data;
 
   } catch (err) {
