@@ -299,6 +299,21 @@ router.post(
           ? String(session.payment_intent)
           : session.id;
 
+        // Extract Client Public IP from Stripe Session / Charge
+        let clientIp = session.customer_details?.ip_address || "N/A";
+        if (session.payment_intent && typeof session.payment_intent === "string") {
+          try {
+            const pi = await stripe.paymentIntents.retrieve(session.payment_intent, {
+              expand: ["latest_charge"],
+            });
+            if (pi.latest_charge?.client_ip) {
+              clientIp = pi.latest_charge.client_ip;
+            }
+          } catch (e) {
+            console.warn("⚠️ Could not fetch Charge client_ip:", e.message);
+          }
+        }
+
         if (syncroInvoiceId) {
           try {
             const payRes = await recordSyncroPayment(
@@ -307,19 +322,21 @@ router.post(
               amountString,
               paymentIntentId,
               null,
-              null
+              null,
+              clientIp
             );
 
             invoicePaymentStatus.set(syncroInvoiceId, {
               status: "paid",
               amount: amountString,
               paymentId: payRes?.payment?.id || null,
+              clientIp: clientIp,
             });
 
             invoiceCustomerCache.delete(syncroInvoiceId);
 
             console.log(
-              `✅ Posted online payment of $${amountString} to Syncro Invoice #${syncroInvoiceId}`
+              `✅ Posted online payment of $${amountString} to Syncro Invoice #${syncroInvoiceId} (Client IP: ${clientIp})`
             );
           } catch (syncroErr) {
             console.error(
