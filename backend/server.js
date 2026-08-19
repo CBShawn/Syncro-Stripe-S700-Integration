@@ -17,6 +17,7 @@ const signatureRoutes = require("./routes/signature");
 const terminalRoutes = require("./routes/terminal");
 const paymentEmailRoute = require("./routes/paymentEmail");
 const receiptRoute = require("./routes/receipt");
+const captureRoutes = require("./routes/capture");
 
 const app = express();
 const PORT = config.PORT || process.env.PORT || 3000;
@@ -38,7 +39,9 @@ app.use("/api/stripe/webhook", webhookRoute);
 app.use("/", statusRoutes);
 app.use("/", signatureRoutes);
 app.use("/api/terminal", terminalRoutes);
+app.use("/api", terminalRoutes);
 app.use("/api", paymentEmailRoute); // Registers /api/send-payment-email
+app.use("/api/stripe", captureRoutes);
 
 // Mount Receipt route so /receipt/:invoiceId works directly
 app.use("/receipt", receiptRoute); 
