@@ -3,6 +3,8 @@ const express = require("express");
 const router = express.Router();
 const axios = require("axios");
 
+const { invoiceSignatureCache } = require("../services/cache");
+
 router.get("/:invoiceId", async (req, res) => {
   const { invoiceId } = req.params;
   const syncroSubdomain = process.env.SYNCRO_SUBDOMAIN;
@@ -61,6 +63,39 @@ router.get("/:invoiceId", async (req, res) => {
       ? `<div style="border: 2px solid #000; font-weight: 900; padding: 2px 8px; font-size: 13px; text-transform: uppercase; margin-bottom: 6px; display: inline-block;">PAID IN FULL</div>`
       : "";
 
+    // Dual Signature Resolution (S700 Stripe Cache -> Topaz / Syncro Direct)
+    let signatureUrl = invoiceSignatureCache.get(String(invoiceId)) || null;
+    let signatureSourceLabel = "Customer Signature (Captured on S700)";
+
+    if (!signatureUrl) {
+      signatureUrl = invoice.signature_image || invoice.signature_url || invoice.signature_data || null;
+
+      if (!signatureUrl && Array.isArray(invoice.payments) && invoice.payments.length > 0) {
+        const signedPayment = invoice.payments.find(
+          (p) => p.signature_image || p.signature_url || p.signature_data || p.signature || p.signature_data_url
+        );
+        if (signedPayment) {
+          signatureUrl =
+            signedPayment.signature_image ||
+            signedPayment.signature_url ||
+            signedPayment.signature_data ||
+            signedPayment.signature ||
+            signedPayment.signature_data_url;
+        }
+      }
+
+      if (!signatureUrl && customer.signature) {
+        signatureUrl = customer.signature;
+      }
+
+      if (signatureUrl) {
+        signatureSourceLabel = "Customer Signature";
+        if (!signatureUrl.startsWith("data:") && !signatureUrl.startsWith("http")) {
+          signatureUrl = `data:image/bmp;base64,${signatureUrl}`;
+        }
+      }
+    }
+
     const lineItems = invoice.line_items || [];
     const lineItemsHtml = lineItems
       .map(
@@ -112,7 +147,7 @@ router.get("/:invoiceId", async (req, res) => {
 
     .invheader { width: 100%; margin-bottom: 8px; }
     .invheader-upper { width: 100%; margin-bottom: 8px; border-bottom: 1px dashed #000; padding-bottom: 6px; text-align: center; }
-    .invheader-logo img { max-height: 60px; max-width: 210px; height: auto; width: auto; display: block; margin: 0 auto 4px auto; background: #ffffff; }
+    .invheader-logo img { max-height: 60px; max-width: 210px; height: auto; width: auto; display: block; margin: 0 auto 4px auto; background: #ffffff; filter: grayscale(100%) contrast(160%); }
     .invheader-address-account { font-size: 11px; line-height: 14px; margin-top: 4px; }
     .invheader-lower { width: 100%; margin-top: 4px; margin-bottom: 8px; }
     .invheader-address-client { font-size: 11px; line-height: 14px; margin-bottom: 6px; }
@@ -125,12 +160,14 @@ router.get("/:invoiceId", async (req, res) => {
       background-color: #e5e5e5; border-top: solid 1px #000; border-bottom: solid 1px #000; font-weight: bold; padding: 4px 2px !important;
     }
 
+    /* ITEMS TABLE */
     .invbody { width: 100%; clear: both; }
     .invbody-items { width: 100%; border-collapse: collapse; margin-top: 6px; margin-bottom: 8px; }
     .invbody-items th { background-color: #e3e3e3; border-top: solid 1px #000; border-bottom: solid 1px #000; font-size: 9.5px; text-transform: uppercase; padding: 3px 1px; text-align: left; }
     .invbody-items td { padding: 4px 1px; border-bottom: solid 1px #e5e5e5; font-size: 10px; vertical-align: top; }
     .invbody-items .unitcost, .invbody-items .quantity, .invbody-items .linetotal { text-align: right; }
 
+    /* SUMMARY TABLE */
     .invbody-summary { width: 100%; margin-top: 6px; border-top: solid 2px #000; padding-top: 4px; }
     .invbody-summary table { width: 100%; border-collapse: collapse; }
     .invbody-summary th { font-weight: normal; text-align: left; font-size: 11px; padding: 2px 0; }
@@ -144,8 +181,8 @@ router.get("/:invoiceId", async (req, res) => {
     .disclaimer-sec p { font-size: 9px; line-height: 12px; margin: 0; }
 
     /* SIGNATURE BLOCK */
-    .signature-container { margin-top: 12px; text-align: center; width: 100%; min-height: 60px; }
-    .signature-img-tag { max-width: 220px; max-height: 70px; width: auto; height: auto; background-color: #ffffff !important; display: block; margin: 0 auto 4px auto; }
+    .signature-container { margin-top: 12px; text-align: center; width: 100%; }
+    .signature-img-tag { max-width: 220px; max-height: 70px; width: auto; height: auto; background-color: #ffffff !important; filter: grayscale(100%) contrast(200%); display: block; margin: 0 auto 4px auto; }
     .signature-line { border-top: 1px solid #000; margin-top: 2px; padding-top: 2px; font-size: 10px; text-align: center; font-weight: bold; }
 
     .barcode-container { text-align: center; padding: 10px 0; }
@@ -154,30 +191,10 @@ router.get("/:invoiceId", async (req, res) => {
     @media print { body { width: 72mm; margin: 0 auto; } }
   </style>
   <script>
-    var hasPrinted = false;
-
-    function triggerPrint() {
-      if (!hasPrinted) {
-        hasPrinted = true;
-        window.print();
-      }
-    }
-
-    // Listen for signature pushed from Chrome Extension
-    window.addEventListener('message', function(event) {
-      if (event.data && event.data.type === 'SYNCRO_SIGNATURE' && event.data.signature) {
-        var img = document.getElementById('rendered-signature-img');
-        if (img) {
-          img.src = event.data.signature;
-          img.style.display = 'block';
-          setTimeout(triggerPrint, 250);
-        }
-      }
-    });
-
-    // Fallback print if no signature exists
     window.addEventListener('load', function() {
-      setTimeout(triggerPrint, 900);
+      setTimeout(function() {
+        window.print();
+      }, 350);
     });
   </script>
 </head>
@@ -254,10 +271,19 @@ router.get("/:invoiceId", async (req, res) => {
         <p>Hardware warranty and service policy apply. All claims must be accompanied by receipt. Work accepted and payment acknowledged.</p>
       </div>
 
-      <!-- Customer Signature Section -->
+      <!-- Unified Customer Signature (S700 / Topaz) -->
       <div class="signature-container">
-        <img id="rendered-signature-img" class="signature-img-tag" style="display:none;" alt="Customer Signature" />
-        <div class="signature-line">Customer Signature</div>
+        ${
+          signatureUrl
+            ? `
+          <img class="signature-img-tag" src="${signatureUrl}" alt="Customer Signature" />
+          <div class="signature-line">${signatureSourceLabel}</div>
+        `
+            : `
+          <div style="height: 35px;"></div>
+          <div class="signature-line">Customer Signature</div>
+        `
+        }
       </div>
 
     </div>
