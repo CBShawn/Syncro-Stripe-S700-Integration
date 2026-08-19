@@ -145,7 +145,9 @@ router.post(
                 pending.amountString,
                 pending.paymentIntentId,
                 null,
-                fileId
+                fileId,
+                "Stripe Terminal",
+                null
               );
 
               const syncroPaymentId = syncroPaymentRes?.payment?.id || null;
@@ -221,6 +223,8 @@ router.post(
                   pending.amountString,
                   pending.paymentIntentId,
                   null,
+                  null,
+                  "Stripe Terminal",
                   null
                 );
 
@@ -299,15 +303,21 @@ router.post(
           ? String(session.payment_intent)
           : session.id;
 
-        // Extract Client Public IP from Stripe Session / Charge
-        let clientIp = session.customer_details?.ip_address || "N/A";
+        // Retrieve IP address from customer details or expand charge
+        let clientIp = session.customer_details?.ip_address || "";
+
         if (session.payment_intent && typeof session.payment_intent === "string") {
           try {
             const pi = await stripe.paymentIntents.retrieve(session.payment_intent, {
-              expand: ["latest_charge"],
+              expand: ["latest_charge", "charges.data"],
             });
-            if (pi.latest_charge?.client_ip) {
-              clientIp = pi.latest_charge.client_ip;
+            const charge =
+              (typeof pi.latest_charge === "object" ? pi.latest_charge : null) ||
+              (pi.charges?.data && pi.charges.data[0]) ||
+              null;
+
+            if (charge?.client_ip) {
+              clientIp = charge.client_ip;
             }
           } catch (e) {
             console.warn("⚠️ Could not fetch Charge client_ip:", e.message);
@@ -323,6 +333,7 @@ router.post(
               paymentIntentId,
               null,
               null,
+              "Stripe Web",
               clientIp
             );
 
@@ -330,13 +341,13 @@ router.post(
               status: "paid",
               amount: amountString,
               paymentId: payRes?.payment?.id || null,
-              clientIp: clientIp,
+              clientIp: clientIp || null,
             });
 
             invoiceCustomerCache.delete(syncroInvoiceId);
 
             console.log(
-              `✅ Posted online payment of $${amountString} to Syncro Invoice #${syncroInvoiceId} (Client IP: ${clientIp})`
+              `✅ Posted online payment of $${amountString} to Syncro Invoice #${syncroInvoiceId} (Client IP: ${clientIp || "None"})`
             );
           } catch (syncroErr) {
             console.error(
