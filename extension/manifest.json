@@ -1,12 +1,18 @@
 {
   "manifest_version": 3,
   "name": "Syncro Stripe Payments & Terminal",
-  "version": "1.1",
-  "description": "Trigger Stripe S700 payments and email ACH/Credit Card payment links directly from Syncro MSP invoices.",
-  "permissions": ["activeTab", "storage"],
+  "version": "1.5",
+  "description": "Trigger Stripe S700 payments, Topaz signatures, and email ACH/Credit Card payment links directly from Syncro MSP invoices.",
+  "permissions": [
+    "activeTab",
+    "storage"
+  ],
   "host_permissions": [
     "https://*.syncromsp.com/*",
-    "https://*/*"
+    "https://*/*",
+    "http://tablet.sigwebtablet.com/*",
+    "http://localhost/*",
+    "http://127.0.0.1/*"
   ],
   "options_ui": {
     "page": "options.html",
@@ -14,8 +20,22 @@
   },
   "content_scripts": [
     {
-      "matches": ["https://*.syncromsp.com/invoices/*"],
-      "js": ["content.js"],
+      "matches": [
+        "https://*.syncromsp.com/*"
+      ],
+      "js": [
+        "content.js"
+      ],
+      "run_at": "document_idle"
+    },
+    {
+      "matches": [
+        "https://*.syncromsp.com/payments/*"
+      ],
+      "js": [
+        "paymentSign.js"
+      ],
+      "world": "MAIN",
       "run_at": "document_idle"
     }
   ]
