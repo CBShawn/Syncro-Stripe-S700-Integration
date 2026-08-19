@@ -51,7 +51,8 @@ async function recordSyncroPayment(
   stripePaymentIntentId,
   stripeInvoiceId = null,
   signatureFileId = null,
-  overrideMethod = null
+  overrideMethod = null,
+  explicitClientIp = null
 ) {
   const cleanInvoiceId = String(syncroInvoiceId || "").trim();
   const cleanSigFileId = sanitizeFileId(signatureFileId);
@@ -102,15 +103,20 @@ async function recordSyncroPayment(
       }
     }
 
-    // 2. GET STRIPE PAYMENT DETAILS (CARD / CARD_PRESENT)
+    // 2. GET STRIPE PAYMENT DETAILS (CARD / CARD_PRESENT / IP)
     let stripePayment = null;
-    try {
-      stripePayment = await stripe.paymentIntents.retrieve(
-        stripePaymentIntentId,
-        { expand: ["payment_method", "charges.data"] }
-      );
-    } catch (stripeErr) {
-      console.warn("Stripe lookup warning:", stripeErr.message);
+    let latestChargeObj = null;
+
+    if (stripePaymentIntentId) {
+      try {
+        stripePayment = await stripe.paymentIntents.retrieve(
+          stripePaymentIntentId,
+          { expand: ["payment_method", "latest_charge", "charges.data"] }
+        );
+        latestChargeObj = stripePayment?.latest_charge;
+      } catch (stripeErr) {
+        console.warn("Stripe lookup warning:", stripeErr.message);
+      }
     }
 
     const cardPresent = stripePayment?.payment_method?.card_present || {};
@@ -118,9 +124,13 @@ async function recordSyncroPayment(
     const usBankAccount = stripePayment?.payment_method?.us_bank_account || {};
     const cardInfo = cardPresent.brand ? cardPresent : cardDetails;
 
-    // Automatic Method Detection:
-    // If cardPresent has a brand, it was swiped/dipped on the S700 -> "Stripe Terminal"
-    // Otherwise, it came through online web/email link -> "Stripe Web"
+    // Resolve client IP
+    const resolvedClientIp =
+      explicitClientIp ||
+      latestChargeObj?.client_ip ||
+      "";
+
+    // Automatic Method Detection
     let finalPaymentMethod = overrideMethod;
     if (!finalPaymentMethod) {
       if (cardPresent.brand) {
@@ -148,7 +158,7 @@ async function recordSyncroPayment(
     const notesstring = [
       isTerminal ? `Stripe Terminal Payment` : `Stripe Online Payment`,
       `PaymentIntent: ${stripePaymentIntentId || "N/A"}`,
-      `Charge: ${stripePayment?.latest_charge || "N/A"}`,
+      `Charge: ${latestChargeObj?.id || stripePayment?.latest_charge || "N/A"}`,
       usBankAccount.bank_name
         ? `ACH Bank: ${usBankAccount.bank_name}`
         : `Card: ${cardInfo.description || cardInfo.brand || "N/A"}`,
@@ -179,12 +189,12 @@ async function recordSyncroPayment(
         ? `Bank: ${usBankAccount.bank_name} | Last: ${usBankAccount.last4}`
         : `Card: ${cardInfo.description || cardInfo.brand || "N/A"} | Last: ${cardInfo.last4 || "N/A"}`,
       `PI: ${stripePaymentIntentId || "N/A"}`,
-      `Charge: ${stripePayment?.latest_charge || "N/A"}`,
+      `Charge: ${latestChargeObj?.id || stripePayment?.latest_charge || "N/A"}`,
     ]
       .join(" | ")
       .substring(0, 255);
 
-    // 6. SYNCRO PAYMENT PAYLOAD
+    // 6. SYNCRO PAYMENT PAYLOAD WITH NATIVE ip_address FIELD
     const payload = {
       payment: {
         customer_id: parsedCustomerId,
@@ -193,6 +203,7 @@ async function recordSyncroPayment(
         amount_cents: totalCents,
         payment_method: finalPaymentMethod,
         ref_num: referenceString,
+        ip_address: resolvedClientIp || "",
         notes: notesstring,
         transaction_response: transactionresponse,
         address_state: customerData.state || "",
@@ -238,9 +249,10 @@ async function recordSyncroPayment(
       amount: amountString,
       paymentId: createdPayment.id || null,
       stripe_invoice_id: stripeInvoiceId || "",
+      clientIp: resolvedClientIp || null,
     });
 
-    console.log(`✅ Syncro Invoice #${cleanInvoiceId} marked PAID ($${amountString}) via ${finalPaymentMethod} (Payment ID: ${createdPayment.id})`);
+    console.log(`✅ Syncro Invoice #${cleanInvoiceId} marked PAID ($${amountString}) via ${finalPaymentMethod} (Payment ID: ${createdPayment.id}${resolvedClientIp ? `, IP: ${resolvedClientIp}` : ""})`);
     return syncroResponse.data;
 
   } catch (err) {
