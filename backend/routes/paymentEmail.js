@@ -77,14 +77,12 @@ router.post("/send-payment-email", async (req, res) => {
 
     const amountInCents = Math.round((invoice.balance_due || amount) * 100);
 
-    // 3. Create Stripe Checkout Session (Cards + ACH Direct Debit)
+    // 3. Create Stripe Checkout Session with manual capture
     console.log(`➡️ [4/5] Creating Stripe Checkout Session ($${(amountInCents / 100).toFixed(2)})...`);
     const session = await stripe.checkout.sessions.create({
-      payment_method_types: ["card", "us_bank_account"],
-      payment_method_options: {
-        us_bank_account: {
-          financial_connections: { permissions: ["payment_method"] },
-        },
+      payment_method_types: ["card"],
+      payment_intent_data: {
+        capture_method: "manual",
       },
       line_items: [
         {
