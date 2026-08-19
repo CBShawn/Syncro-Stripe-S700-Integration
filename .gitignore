@@ -1,9 +1,14 @@
-cat << 'EOF' > .gitignore
-node_modules/
+# Local cache and persistent storage
+data/
+
+# Environment variables
 .env
+.env.*
+!.env.example
+
+# OS generated files
 .DS_Store
-*.log
-EOF
+Thumbs.db
 
 # Logs
 logs
@@ -72,11 +77,6 @@ web_modules/
 # Yarn Integrity file
 .yarn-integrity
 
-# dotenv environment variable files
-.env
-.env.*
-!.env.example
-
 # parcel-bundler cache (https://parceljs.org/)
 .cache
 .parcel-cache
@@ -92,9 +92,6 @@ dist
 
 # Gatsby files
 .cache/
-# Comment in the public line in if your project uses Gatsby and not Next.js
-# https://nextjs.org/blog/next-9-1#public-directory-support
-# public
 
 # vuepress build output
 .vuepress/dist
