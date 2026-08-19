@@ -8,7 +8,54 @@ const stripe = Stripe(process.env.STRIPE_SECRET_KEY);
 
 const SYNCRO_SUBDOMAIN = process.env.SYNCRO_SUBDOMAIN;
 const SYNCRO_API_KEY = process.env.SYNCRO_API_KEY;
+const PORT = process.env.PORT || 3000;
+const BASE_URL =
+  process.env.RENDER_EXTERNAL_URL ||
+  process.env.BASE_URL ||
+  `http://localhost:${PORT}`;
 
+// ================================================================
+// 1. CLIENT CLICK INTERCEPTOR (CAPTURES REAL CLIENT IP)
+// ================================================================
+router.get("/pay/:sessionId", async (req, res) => {
+  const { sessionId } = req.params;
+
+  try {
+    const rawIp =
+      req.headers["x-forwarded-for"]?.split(",")[0]?.trim() ||
+      req.socket?.remoteAddress ||
+      "";
+    const clientIp = rawIp.replace(/^.*:/, ""); // clean ipv6 localhost prefix if any
+
+    console.log(`🌐 Customer clicked payment link for Session ${sessionId} from IP: ${clientIp}`);
+
+    // Retrieve session to get the Stripe URL and update metadata with client IP
+    const session = await stripe.checkout.sessions.retrieve(sessionId);
+
+    await stripe.checkout.sessions.update(sessionId, {
+      metadata: {
+        ...session.metadata,
+        client_ip: clientIp,
+      },
+    });
+
+    // Seamlessly redirect customer to Stripe hosted checkout
+    return res.redirect(session.url);
+  } catch (err) {
+    console.error("⚠️ Failed to intercept customer IP on redirect:", err.message);
+    // Fallback: redirect directly to Stripe session if update fails
+    try {
+      const session = await stripe.checkout.sessions.retrieve(sessionId);
+      return res.redirect(session.url);
+    } catch {
+      return res.status(500).send("Unable to redirect to payment checkout.");
+    }
+  }
+});
+
+// ================================================================
+// 2. SEND PAYMENT EMAIL
+// ================================================================
 router.post("/send-payment-email", async (req, res) => {
   try {
     const { invoiceId, amount, customerEmail } = req.body;
@@ -22,7 +69,7 @@ router.post("/send-payment-email", async (req, res) => {
       return res.status(400).json({ error: "Valid invoiceId and positive amount are required." });
     }
 
-    // 1. Fetch Syncro Invoice & Customer details
+    // Fetch Syncro Invoice & Customer details
     console.log(`➡️ [3/5] Fetching Syncro Invoice #${cleanInvoiceId}...`);
     const invRes = await axios.get(
       `https://${SYNCRO_SUBDOMAIN}.syncromsp.com/api/v1/invoices/${cleanInvoiceId}?api_key=${SYNCRO_API_KEY}`
@@ -39,13 +86,7 @@ router.post("/send-payment-email", async (req, res) => {
       return res.status(400).json({ error: "Customer ID could not be identified for this invoice." });
     }
 
-    // Client IP
-    const callerIp =
-      req.headers["x-forwarded-for"]?.split(",")[0]?.trim() ||
-      req.socket?.remoteAddress ||
-      "";
-
-    // 2. Create Stripe Checkout Session
+    // Create Stripe Checkout Session
     console.log(`➡️ [4/5] Creating Stripe Checkout Session ($${numAmount.toFixed(2)})...`);
     const session = await stripe.checkout.sessions.create({
       payment_method_types: ["card", "us_bank_account"],
@@ -67,20 +108,26 @@ router.post("/send-payment-email", async (req, res) => {
       metadata: {
         syncro_invoice_id: String(invoice.id),
         syncro_customer_id: String(targetCustomerId),
-        client_ip: callerIp,
       },
+      success_url: `https://${SYNCRO_SUBDOMAIN}.syncromsp.com/invoices/${cleanInvoiceId}`,
+      cancel_url: `https://${SYNCRO_SUBDOMAIN}.syncromsp.com/invoices/${cleanInvoiceId}`,
     });
 
     console.log(`➡️ Stripe Session created: ${session.id}`);
 
-    // 3. Dispatch via Syncro Invoice Mailer
+    // Build the tracked payment URL
+    const trackedPayUrl = `${BASE_URL}/api/pay/${session.id}`;
+
+    // Dispatch via Syncro Invoice Mailer
     console.log(`➡️ [5/5] Dispatching via Syncro Invoice Mailer...`);
+    const emailBody = `Please click the link below to securely pay your invoice online:\n\n${trackedPayUrl}\n\nThank you for your business!`;
 
     await axios.post(
       `https://${SYNCRO_SUBDOMAIN}.syncromsp.com/api/v1/invoices/${cleanInvoiceId}/email?api_key=${SYNCRO_API_KEY}`,
       {
         email: recipientEmail,
-        payment_url: session.url,
+        subject: `Payment Link for Invoice #${invoice.number || cleanInvoiceId}`,
+        body: emailBody,
       },
       {
         headers: { "Content-Type": "application/json" },
@@ -88,7 +135,7 @@ router.post("/send-payment-email", async (req, res) => {
     );
 
     console.log(`✅ Email dispatched and logged directly into Invoice #${cleanInvoiceId} history!`);
-    return res.json({ success: true, checkoutUrl: session.url });
+    return res.json({ success: true, checkoutUrl: trackedPayUrl });
   } catch (err) {
     console.error("❌ Failed to process payment email:", err.response?.data || err.message);
     return res.status(500).json({ error: err.response?.data || err.message });
