@@ -152,7 +152,6 @@ router.post(
 
               const syncroPaymentId = syncroPaymentRes?.payment?.id || null;
 
-              // Sets status to paid + returns paymentId to trigger extension redirect to Topaz page
               invoicePaymentStatus.set(String(pending.syncroInvoiceId), {
                 status: "paid",
                 amount: pending.amountString,
@@ -209,7 +208,6 @@ router.post(
 
             console.log(`💳 Card charged. Triggering S700 signature screen for PI ${pi.id}...`);
 
-            // Safety timeout: If customer skips S700 sign, still post to Syncro & redirect to Topaz after 25s
             setTimeout(async () => {
               const pending = pendingSyncroPayments.get(String(pi.id));
               if (pending) {
@@ -239,7 +237,6 @@ router.post(
               }
             }, 25000);
 
-            // Display signature screen on the S700 reader
             try {
               const signaturePayload = new URLSearchParams();
               signaturePayload.append("inputs[0][type]", "signature");
@@ -303,8 +300,8 @@ router.post(
           ? String(session.payment_intent)
           : session.id;
 
-        // Comprehensive multi-path IP address extraction
-        let clientIp = session.customer_details?.ip_address || "";
+        // Multi-source IP extraction
+        let clientIp = metadata.client_ip || session.customer_details?.ip_address || "";
 
         if (session.payment_intent && typeof session.payment_intent === "string") {
           try {
@@ -312,21 +309,14 @@ router.post(
               expand: ["latest_charge", "charges.data"],
             });
 
-            // 1. Check latest_charge if returned as an expanded object
             if (pi.latest_charge && typeof pi.latest_charge === "object") {
               clientIp = pi.latest_charge.client_ip || clientIp;
-            } 
-            // 2. Check charges.data array
-            else if (pi.charges?.data && pi.charges.data.length > 0) {
+            } else if (pi.charges?.data && pi.charges.data.length > 0) {
               clientIp = pi.charges.data[0].client_ip || clientIp;
-            } 
-            // 3. Direct charge retrieval if latest_charge is still a string ID
-            else if (typeof pi.latest_charge === "string") {
+            } else if (typeof pi.latest_charge === "string") {
               const directCharge = await stripe.charges.retrieve(pi.latest_charge);
               clientIp = directCharge.client_ip || clientIp;
             }
-
-            console.log(`🌐 Resolved IP for Checkout Session (${session.id}): ${clientIp || "None"}`);
           } catch (e) {
             console.warn("⚠️ Could not fetch Charge client_ip:", e.message);
           }
