@@ -132,7 +132,7 @@ async function recordSyncroPayment(
     if (!resolvedClientIp && latestChargeObj?.client_ip) {
       resolvedClientIp = latestChargeObj.client_ip;
     }
-    if (!resolvedClientIp || resolvedClientIp === "N/A") {
+    if (!resolvedClientIp || resolvedClientIp === "N/A" || resolvedClientIp === "None") {
       resolvedClientIp = "";
     }
 
@@ -163,6 +163,7 @@ async function recordSyncroPayment(
     const isTerminal = finalPaymentMethod === "Stripe Terminal";
     const notesstring = [
       isTerminal ? `Stripe Terminal Payment` : `Stripe Online Payment`,
+      resolvedClientIp ? `Client IP: ${resolvedClientIp}` : null,
       `PaymentIntent: ${stripePaymentIntentId || "N/A"}`,
       `Charge: ${latestChargeObj?.id || stripePayment?.latest_charge || "N/A"}`,
       usBankAccount.bank_name
