@@ -1,101 +1,152 @@
 // routes/paymentEmail.js
 const express = require("express");
-const axios = require("axios");
-const Stripe = require("stripe");
-
 const router = express.Router();
-const stripe = Stripe(process.env.STRIPE_SECRET_KEY);
+const Stripe = require("stripe");
+const axios = require("axios");
 
-const SYNCRO_SUBDOMAIN = process.env.SYNCRO_SUBDOMAIN;
-const SYNCRO_API_KEY = process.env.SYNCRO_API_KEY;
+router.use(express.json());
+
+const stripe = new Stripe(process.env.STRIPE_SECRET_KEY, {
+  timeout: 10000,
+});
 
 router.post("/send-payment-email", async (req, res) => {
+  console.log("➡️ [1/5] send-payment-email endpoint reached!");
+
   try {
-    const { invoiceId, amount, customerEmail } = req.body;
-    const cleanInvoiceId = String(invoiceId || "").trim();
-    const numAmount = parseFloat(amount);
-
-    console.log(`➡️ [1/5] send-payment-email endpoint reached!`);
-    console.log(`➡️ [2/5] Payload received - Invoice ID: ${cleanInvoiceId}, Amount: ${numAmount}`);
-
-    if (!cleanInvoiceId || isNaN(numAmount) || numAmount <= 0) {
-      return res.status(400).json({ error: "Valid invoiceId and positive amount are required." });
+    // 1. Authenticate Extension Request
+    const extensionKey = req.headers["x-extension-key"];
+    if (process.env.EXTENSION_AUTH_KEY && extensionKey !== process.env.EXTENSION_AUTH_KEY) {
+      console.log("❌ Unauthorized extension key");
+      return res.status(401).json({ success: false, error: "Unauthorized extension key." });
     }
 
-    // 1. Fetch Syncro Invoice & Customer details
-    console.log(`➡️ [3/5] Fetching Syncro Invoice #${cleanInvoiceId}...`);
-    const invRes = await axios.get(
-      `https://${SYNCRO_SUBDOMAIN}.syncromsp.com/api/v1/invoices/${cleanInvoiceId}?api_key=${SYNCRO_API_KEY}`
+    const { invoiceId, amount, customerId } = req.body || {};
+    console.log(`➡️ [2/5] Payload received - Invoice ID: ${invoiceId}, Amount: ${amount}`);
+
+    if (!invoiceId) {
+      return res.status(400).json({ success: false, error: "Missing invoiceId." });
+    }
+
+    // 2. Fetch Syncro Invoice
+    const syncroSubdomain = process.env.SYNCRO_SUBDOMAIN;
+    const syncroApiKey = process.env.SYNCRO_API_KEY;
+
+    console.log(`➡️ [3/5] Fetching Syncro Invoice #${invoiceId}...`);
+    const syncroRes = await axios.get(
+      `https://${syncroSubdomain}.syncromsp.com/api/v1/invoices/${invoiceId}?api_key=${syncroApiKey}`,
+      { timeout: 8000 }
     );
-    const invoice = invRes.data?.invoice;
+
+    const invoice = syncroRes.data?.invoice;
     if (!invoice) {
-      return res.status(404).json({ error: `Syncro Invoice #${cleanInvoiceId} not found.` });
+      console.log("❌ Syncro Invoice not found");
+      return res.status(404).json({ success: false, error: "Syncro invoice not found." });
     }
 
-    const targetCustomerId = invoice.customer_id || invoice.customer?.id;
-    const recipientEmail = customerEmail || invoice.customer?.email;
-
-    if (!targetCustomerId) {
-      return res.status(400).json({ error: "Customer ID could not be identified for this invoice." });
+    if (invoice.paid || invoice.balance_due <= 0) {
+      console.log("⚠️ Invoice already paid or 0 balance");
+      return res.status(400).json({ success: false, error: "Invoice is already paid or has no balance due." });
     }
 
-    // Capture incoming client IP
+    // Resolve Customer Email & ID
+    let customerEmail = invoice.customer_email || invoice.customer?.email;
+    let targetCustomerId = customerId || invoice.customer_id || invoice.customer?.id;
+
+    if (!customerEmail && targetCustomerId) {
+      try {
+        const custRes = await axios.get(
+          `https://${syncroSubdomain}.syncromsp.com/api/v1/customers/${targetCustomerId}?api_key=${syncroApiKey}`,
+          { timeout: 8000 }
+        );
+        customerEmail = custRes.data?.customer?.email;
+      } catch (cErr) {
+        console.warn("⚠️ Customer lookup fallback failed:", cErr.message);
+      }
+    }
+
+    if (!customerEmail) {
+      console.log("❌ No customer email found");
+      return res.status(400).json({ success: false, error: "No email found for customer." });
+    }
+
     const callerIp =
       req.headers["x-forwarded-for"]?.split(",")[0]?.trim() ||
       req.socket?.remoteAddress ||
       "";
 
-    // 2. Create Stripe Checkout Session with Metadata
-    console.log(`➡️ [4/5] Creating Stripe Checkout Session ($${numAmount.toFixed(2)})...`);
+    const amountInCents = Math.round((invoice.balance_due || amount) * 100);
+
+    // 3. Create Stripe Checkout Session (Cards + ACH Direct Debit)
+    console.log(`➡️ [4/5] Creating Stripe Checkout Session ($${(amountInCents / 100).toFixed(2)})...`);
     const session = await stripe.checkout.sessions.create({
       payment_method_types: ["card", "us_bank_account"],
+      payment_method_options: {
+        us_bank_account: {
+          financial_connections: { permissions: ["payment_method"] },
+        },
+      },
       line_items: [
         {
           price_data: {
             currency: "usd",
             product_data: {
-              name: `Invoice #${invoice.number || cleanInvoiceId}`,
-              description: `Payment for Invoice #${invoice.number || cleanInvoiceId}`,
+              name: `Invoice #${invoice.number || invoice.id}`,
+              description: `Payment for ${invoice.customer_business_then_name || "CodeBlackIT Services"}`,
             },
-            unit_amount: Math.round(numAmount * 100),
+            unit_amount: amountInCents,
           },
           quantity: 1,
         },
       ],
       mode: "payment",
-      customer_email: recipientEmail || undefined,
+      customer_email: customerEmail,
       metadata: {
         syncro_invoice_id: String(invoice.id),
-        syncro_customer_id: String(targetCustomerId),
+        syncro_customer_id: String(targetCustomerId || ""),
         client_ip: callerIp,
       },
-      success_url: `https://${SYNCRO_SUBDOMAIN}.syncromsp.com/invoices/${cleanInvoiceId}`,
-      cancel_url: `https://${SYNCRO_SUBDOMAIN}.syncromsp.com/invoices/${cleanInvoiceId}`,
+      success_url: `https://${syncroSubdomain}.syncromsp.com/invoices/${invoice.id}?payment=success`,
+      cancel_url: `https://${syncroSubdomain}.syncromsp.com/invoices/${invoice.id}?payment=cancelled`,
     });
 
     console.log(`➡️ Stripe Session created: ${session.id}`);
 
-    // 3. Dispatch via Syncro Invoice Mailer
-    console.log(`➡️ [5/5] Dispatching via Syncro Invoice Mailer...`);
-    const emailBody = `Please click the link below to securely pay your invoice online:\n\n${session.url}\n\nThank you for your business!`;
+    // 4. Pass the raw Stripe URL directly
+    const customInvoiceMessage = session.url;
 
+    // 5. Send & Log via Syncro's Native Invoice Mailer API
+    console.log(`➡️ [5/5] Dispatching via Syncro Invoice Mailer...`);
     await axios.post(
-      `https://${SYNCRO_SUBDOMAIN}.syncromsp.com/api/v1/invoices/${cleanInvoiceId}/email?api_key=${SYNCRO_API_KEY}`,
+      `https://${syncroSubdomain}.syncromsp.com/api/v1/invoices/${invoice.id}/email?api_key=${syncroApiKey}`,
       {
-        email: recipientEmail,
-        subject: `Payment Link for Invoice #${invoice.number || cleanInvoiceId}`,
-        body: emailBody,
+        email: customerEmail,
+        subject: `Invoice #${invoice.number || invoice.id} from CodeBlackIT`,
+        custom_invoice_message: customInvoiceMessage,
+        message: customInvoiceMessage,
+        comment: customInvoiceMessage,
       },
       {
         headers: { "Content-Type": "application/json" },
+        timeout: 10000,
       }
     );
 
-    console.log(`✅ Email dispatched and logged directly into Invoice #${cleanInvoiceId} history!`);
-    return res.json({ success: true, checkoutUrl: session.url });
+    console.log(`✅ Email dispatched and logged directly into Invoice #${invoice.id} history!`);
+
+    return res.json({
+      success: true,
+      emailSent: true,
+      paymentUrl: session.url,
+      message: `Invoice #${invoice.number || invoice.id} emailed via Syncro and logged to invoice history.`,
+    });
+
   } catch (err) {
-    console.error("❌ Failed to process payment email:", err.response?.data || err.message);
-    return res.status(500).json({ error: err.response?.data || err.message });
+    console.error("❌ ERROR in send-payment-email:", err.response?.data || err.message);
+    return res.status(500).json({
+      success: false,
+      error: err.response?.data?.message || err.message || "Internal server error",
+    });
   }
 });
 
