@@ -127,7 +127,9 @@ async function recordSyncroPayment(
       : "";
 
     const sigTag = cleanSigFileId ? ` | Sig: ${signatureUrl}` : "";
-    const referenceString = `${stripeInvoiceId || stripePaymentIntentId || "Stripe_Payment"}`;
+
+    // Appends the signature URL right into ref_num
+    const referenceString = `${stripeInvoiceId || stripePaymentIntentId || "Stripe_Payment"}${sigTag}`;
 
     // 4. BUILD NOTES
     const notesstring = [
