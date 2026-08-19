@@ -1,3 +1,4 @@
+// routes/terminal.js
 const express = require("express");
 const router = express.Router();
 const axios = require("axios");
@@ -17,7 +18,7 @@ const {
 } = require("../services/cache");
 
 // =========================================================================
-// 1. PAYMENT STATUS POLLING ROUTE (RETURNS PAYMENT ID FOR RECEIPT REDIRECT)
+// 1. PAYMENT STATUS POLLING ROUTE
 // =========================================================================
 router.get("/payment-status/:invoiceId", (req, res) => {
   const invoiceId = String(req.params.invoiceId || "").trim();
@@ -36,13 +37,13 @@ router.get("/payment-status/:invoiceId", (req, res) => {
   return res.json({
     status: record.status || "paid",
     amount: record.amount,
-    paymentId: record.paymentId || null, // <--- Returns Syncro Payment ID to Chrome Extension
+    paymentId: record.paymentId || null,
     stage: record.stage || null,
   });
 });
 
 // =========================================================================
-// 2. PAY AND SIGN ROUTE
+// 2. PAY AND SIGN ROUTE (MANUAL CAPTURE ENABLED)
 // =========================================================================
 router.post("/pay-and-sign", async (req, res) => {
   try {
@@ -169,11 +170,13 @@ router.post("/pay-and-sign", async (req, res) => {
       throw new Error("Failed to resolve or create Stripe customer object.");
     }
 
+    // ⚡ Manual capture enabled (auth only)
     const paymentIntent = await stripe.paymentIntents.create({
       amount: totalChargeCents,
       currency: "usd",
       customer: stripeCustomer.id,
       payment_method_types: ["card_present"],
+      capture_method: "manual",
       description: `Payment for Syncro Invoice #${syncroInvoiceId}`,
       metadata: {
         syncro_invoice_id: String(syncroInvoiceId),
