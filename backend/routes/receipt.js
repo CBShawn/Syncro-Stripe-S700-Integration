@@ -19,6 +19,7 @@ router.get("/:invoiceId", async (req, res) => {
   }
 
   try {
+    // 1. Fetch live invoice data from Syncro
     const response = await axios.get(
       `https://${syncroSubdomain}.syncromsp.com/api/v1/invoices/${invoiceId}?api_key=${syncroApiKey}`,
       { timeout: 8000 }
@@ -29,6 +30,7 @@ router.get("/:invoiceId", async (req, res) => {
       return res.status(404).send("Invoice not found.");
     }
 
+    // Customer & Account Data
     const customer = invoice.customer || {};
     const customerName =
       invoice.customer_business_then_name ||
@@ -44,6 +46,7 @@ router.get("/:invoiceId", async (req, res) => {
     const customerZip = customer.zip || "";
     const customerPhone = customer.phone || customer.mobile || "";
 
+    // Financial Values
     const subtotal = `$${parseFloat(invoice.subtotal || 0).toFixed(2)}`;
     const tax = `$${parseFloat(invoice.tax || 0).toFixed(2)}`;
     const total = `$${parseFloat(invoice.total || 0).toFixed(2)}`;
@@ -63,10 +66,60 @@ router.get("/:invoiceId", async (req, res) => {
       ? `<div style="border: 2px solid #000; font-weight: 900; padding: 2px 8px; font-size: 13px; text-transform: uppercase; margin-bottom: 6px; display: inline-block;">PAID IN FULL</div>`
       : "";
 
-    // Dual Signature Resolution (S700 Stripe Cache -> Topaz / Syncro Direct)
+    // =========================================================================
+    // 2. MULTI-TIER SIGNATURE RESOLUTION
+    // =========================================================================
     let signatureUrl = invoiceSignatureCache.get(String(invoiceId)) || null;
     let signatureSourceLabel = "Customer Signature (Captured on S700)";
 
+    // Priority 1: Check ref_num and notes on linked payments in the invoice payload
+    if (!signatureUrl && Array.isArray(invoice.payments) && invoice.payments.length > 0) {
+      for (const p of invoice.payments) {
+        const checkText = `${p.ref_num || ""} ${p.notes || ""}`;
+        const match = checkText.match(/https?:\/\/[^\s|]+\/api\/signature\/[^\s|]+/i);
+        if (match) {
+          signatureUrl = match[0];
+          break;
+        }
+
+        // If file_ ID was saved without full url
+        const fileMatch = checkText.match(/file_[a-zA-Z0-9_]+/);
+        if (fileMatch) {
+          const baseUrl = process.env.RENDER_EXTERNAL_URL || "https://syncro-stripe-s700-integration.onrender.com";
+          signatureUrl = `${baseUrl.replace(/\/+$/, '')}/api/signature/${fileMatch[0]}`;
+          break;
+        }
+      }
+    }
+
+    // Priority 2: Check if payment record has a direct API endpoint
+    if (!signatureUrl && Array.isArray(invoice.payments) && invoice.payments.length > 0) {
+      const paymentId = invoice.payments[0].id || invoice.payments[0].payment_id;
+      if (paymentId) {
+        try {
+          const payRes = await axios.get(
+            `https://${syncroSubdomain}.syncromsp.com/api/v1/payments/${paymentId}?api_key=${syncroApiKey}`,
+            { timeout: 4000 }
+          );
+          const pData = payRes.data?.payment || {};
+          const fullText = `${pData.ref_num || ""} ${pData.notes || ""}`;
+          const match = fullText.match(/https?:\/\/[^\s|]+\/api\/signature\/[^\s|]+/i);
+          if (match) {
+            signatureUrl = match[0];
+          } else {
+            const fileMatch = fullText.match(/file_[a-zA-Z0-9_]+/);
+            if (fileMatch) {
+              const baseUrl = process.env.RENDER_EXTERNAL_URL || "https://syncro-stripe-s700-integration.onrender.com";
+              signatureUrl = `${baseUrl.replace(/\/+$/, '')}/api/signature/${fileMatch[0]}`;
+            }
+          }
+        } catch (payErr) {
+          // ignore error
+        }
+      }
+    }
+
+    // Priority 3: Fallback to Topaz / Syncro native base64 signature
     if (!signatureUrl) {
       signatureUrl = invoice.signature_image || invoice.signature_url || invoice.signature_data || null;
 
@@ -96,6 +149,7 @@ router.get("/:invoiceId", async (req, res) => {
       }
     }
 
+    // 3. Render Line Items
     const lineItems = invoice.line_items || [];
     const lineItemsHtml = lineItems
       .map(
@@ -111,6 +165,7 @@ router.get("/:invoiceId", async (req, res) => {
       )
       .join("");
 
+    // 4. Generate 80mm HTML
     const html = `
 <!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Transitional//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-transitional.dtd">
 <html xmlns="http://www.w3.org/1999/xhtml">
@@ -271,7 +326,7 @@ router.get("/:invoiceId", async (req, res) => {
         <p>Hardware warranty and service policy apply. All claims must be accompanied by receipt. Work accepted and payment acknowledged.</p>
       </div>
 
-      <!-- Unified Customer Signature (S700 / Topaz) -->
+      <!-- Customer Signature Section -->
       <div class="signature-container">
         ${
           signatureUrl
