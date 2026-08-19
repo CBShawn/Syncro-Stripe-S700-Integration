@@ -20,7 +20,6 @@ const {
 
 const STRIPE_WEBHOOK_SECRET = process.env.STRIPE_WEBHOOK_SECRET;
 
-// Helper: Download Stripe File contents as Base64 for receipt printing
 async function fetchStripeSignatureBase64(fileId) {
   if (!fileId) return null;
   try {
@@ -58,9 +57,7 @@ router.post(
         event = JSON.parse(req.body.toString());
       }
     } catch (err) {
-      console.error(
-        `❌ Webhook Signature Verification Failed: ${err.message}`
-      );
+      console.error(`❌ Webhook Signature Verification Failed: ${err.message}`);
       return res.status(400).send(`Webhook Error: ${err.message}`);
     }
 
@@ -68,7 +65,7 @@ router.post(
 
     try {
       // ================================================================
-      // 1. S700 ON-SCREEN SIGNATURE COMPLETED -> POST TO SYNCRO & REDIRECT
+      // 1. S700 ON-SCREEN SIGNATURE COMPLETED -> POST TO SYNCRO
       // ================================================================
       if (event.type === "terminal.reader.action_succeeded") {
         const readerObj = event.data.object;
@@ -106,9 +103,6 @@ router.post(
             fileId = readerObj.action.collect_inputs.value;
           }
 
-          console.log(`📋 Signature PaymentIntent ID: ${paymentIntentId || "NONE"}`);
-          console.log(`📋 Signature File ID: ${fileId || "NONE"}`);
-
           if (paymentIntentId) {
             let base64Sig = null;
             if (fileId) {
@@ -122,10 +116,7 @@ router.post(
 
                 base64Sig = await fetchStripeSignatureBase64(fileId);
               } catch (updateErr) {
-                console.error(
-                  "⚠️ Failed to update PaymentIntent with signature file ID:",
-                  updateErr.message
-                );
+                console.error("⚠️ Failed to update PaymentIntent with signature file ID:", updateErr.message);
               }
             }
 
@@ -138,7 +129,6 @@ router.post(
                 invoiceSignatureCache.set(String(pending.syncroInvoiceId), base64Sig);
               }
 
-              // Post signed payment to Syncro
               const syncroPaymentRes = await recordSyncroPayment(
                 pending.syncroInvoiceId,
                 pending.syncroCustomerId,
@@ -158,43 +148,31 @@ router.post(
                 paymentId: syncroPaymentId,
               });
 
-              await clearTerminalReaderDisplay(
-                pending.readerId || readerObj.id
-              );
+              await clearTerminalReaderDisplay(pending.readerId || readerObj.id);
+              invoiceCustomerCache.delete(String(pending.syncroInvoiceId));
 
-              invoiceCustomerCache.delete(
-                String(pending.syncroInvoiceId)
-              );
-
-              console.log(
-                `✅ Recorded S700 signed payment in Syncro for Invoice #${pending.syncroInvoiceId} (Payment ID: ${syncroPaymentId}). Redirecting browser to Topaz page...`
-              );
+              console.log(`✅ Recorded S700 signed payment in Syncro for Invoice #${pending.syncroInvoiceId} (Payment ID: ${syncroPaymentId})`);
             }
           }
         }
       }
 
       // ================================================================
-      // 2. CARD CHARGED ON S700 -> IMMEDIATELY PROMPT S700 SIGNATURE
+      // 2. CARD AUTHORIZED OR CHARGED ON S700 -> PROMPT SIGNATURE
       // ================================================================
-      if (event.type === "payment_intent.succeeded") {
+      if (
+        event.type === "payment_intent.amount_capturable_updated" ||
+        event.type === "payment_intent.succeeded"
+      ) {
         const pi = event.data.object;
         const metadata = pi.metadata || {};
         const readerId = metadata.stripe_reader_id;
 
         if (!readerId) {
-          console.log(
-            `ℹ️ PaymentIntent ${pi.id} has no stripe_reader_id - skipping terminal signature.`
-          );
+          console.log(`ℹ️ PaymentIntent ${pi.id} has no stripe_reader_id - skipping terminal signature.`);
         } else {
-          const syncroInvoiceId = metadata.syncro_invoice_id
-            ? String(metadata.syncro_invoice_id).trim()
-            : null;
-
-          const syncroCustomerId = metadata.syncro_customer_id
-            ? String(metadata.syncro_customer_id).trim()
-            : null;
-
+          const syncroInvoiceId = metadata.syncro_invoice_id ? String(metadata.syncro_invoice_id).trim() : null;
+          const syncroCustomerId = metadata.syncro_customer_id ? String(metadata.syncro_customer_id).trim() : null;
           const amountString = (pi.amount / 100).toFixed(2);
 
           if (syncroInvoiceId && syncroCustomerId) {
@@ -206,13 +184,12 @@ router.post(
               readerId,
             });
 
-            console.log(`💳 Card charged. Triggering S700 signature screen for PI ${pi.id}...`);
+            console.log(`💳 Card authorized. Triggering S700 signature screen for PI ${pi.id}...`);
 
             setTimeout(async () => {
               const pending = pendingSyncroPayments.get(String(pi.id));
               if (pending) {
                 pendingSyncroPayments.delete(String(pi.id));
-
                 console.log(`⏱️ S700 Signature timeout. Posting payment to Syncro anyway...`);
 
                 const res = await recordSyncroPayment(
@@ -281,26 +258,18 @@ router.post(
       }
 
       // ================================================================
-      // 3. ONLINE CHECKOUT SESSION (ACH & CARD EMAILS)
+      // 3. ONLINE CHECKOUT SESSION
       // ================================================================
       if (event.type === "checkout.session.completed") {
         const session = event.data.object;
         const metadata = session.metadata || {};
 
-        const syncroInvoiceId = metadata.syncro_invoice_id
-          ? String(metadata.syncro_invoice_id).trim()
-          : null;
-
-        const syncroCustomerId = metadata.syncro_customer_id
-          ? String(metadata.syncro_customer_id).trim()
-          : "0";
+        const syncroInvoiceId = metadata.syncro_invoice_id ? String(metadata.syncro_invoice_id).trim() : null;
+        const syncroCustomerId = metadata.syncro_customer_id ? String(metadata.syncro_customer_id).trim() : "0";
 
         const amountString = (session.amount_total / 100).toFixed(2);
-        const paymentIntentId = session.payment_intent
-          ? String(session.payment_intent)
-          : session.id;
+        const paymentIntentId = session.payment_intent ? String(session.payment_intent) : session.id;
 
-        // Multi-source IP extraction
         let clientIp = metadata.client_ip || session.customer_details?.ip_address || "";
 
         if (session.payment_intent && typeof session.payment_intent === "string") {
@@ -356,10 +325,7 @@ router.post(
         }
       }
     } catch (handlerErr) {
-      console.error(
-        "❌ Uncaught Exception inside Webhook Handler:",
-        handlerErr
-      );
+      console.error("❌ Uncaught Exception inside Webhook Handler:", handlerErr);
     }
 
     res.json({ received: true });
