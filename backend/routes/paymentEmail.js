@@ -39,13 +39,13 @@ router.post("/send-payment-email", async (req, res) => {
       return res.status(400).json({ error: "Customer ID could not be identified for this invoice." });
     }
 
-    // Capture incoming client IP
+    // Client IP
     const callerIp =
       req.headers["x-forwarded-for"]?.split(",")[0]?.trim() ||
       req.socket?.remoteAddress ||
       "";
 
-    // 2. Create Stripe Checkout Session with Metadata
+    // 2. Create Stripe Checkout Session
     console.log(`➡️ [4/5] Creating Stripe Checkout Session ($${numAmount.toFixed(2)})...`);
     const session = await stripe.checkout.sessions.create({
       payment_method_types: ["card", "us_bank_account"],
@@ -69,22 +69,18 @@ router.post("/send-payment-email", async (req, res) => {
         syncro_customer_id: String(targetCustomerId),
         client_ip: callerIp,
       },
-      success_url: `https://${SYNCRO_SUBDOMAIN}.syncromsp.com/invoices/${cleanInvoiceId}`,
-      cancel_url: `https://${SYNCRO_SUBDOMAIN}.syncromsp.com/invoices/${cleanInvoiceId}`,
     });
 
     console.log(`➡️ Stripe Session created: ${session.id}`);
 
     // 3. Dispatch via Syncro Invoice Mailer
     console.log(`➡️ [5/5] Dispatching via Syncro Invoice Mailer...`);
-    const emailBody = `Please click the link below to securely pay your invoice online:\n\n${session.url}\n\nThank you for your business!`;
 
     await axios.post(
       `https://${SYNCRO_SUBDOMAIN}.syncromsp.com/api/v1/invoices/${cleanInvoiceId}/email?api_key=${SYNCRO_API_KEY}`,
       {
         email: recipientEmail,
-        subject: `Payment Link for Invoice #${invoice.number || cleanInvoiceId}`,
-        body: emailBody,
+        payment_url: session.url,
       },
       {
         headers: { "Content-Type": "application/json" },
