@@ -127,7 +127,7 @@ async function recordSyncroPayment(
     const usBankAccount = stripePayment?.payment_method?.us_bank_account || {};
     const cardInfo = cardPresent.brand ? cardPresent : cardDetails;
 
-    // Resolve IP address
+    // Resolve IP Address
     let resolvedClientIp = explicitClientIp;
     if (!resolvedClientIp && latestChargeObj?.client_ip) {
       resolvedClientIp = latestChargeObj.client_ip;
