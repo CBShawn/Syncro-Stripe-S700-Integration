@@ -31,13 +31,17 @@ router.post("/cancel/:paymentIntentId", async (req, res) => {
   }
 });
 
-// 3. Batch Capture all pending authorizations (e.g. End of Day)
+// 3. Batch Capture all pending manual authorizations
 router.post("/capture-all", async (req, res) => {
   try {
     const list = await stripe.paymentIntents.list({ limit: 100 });
-    const uncaptured = list.data.filter((pi) => pi.status === "requires_capture");
+    
+    // Strict filter: only capture manual holds
+    const uncaptured = list.data.filter(
+      (pi) => pi.status === "requires_capture" && pi.capture_method === "manual"
+    );
 
-    console.log(`🔄 Found ${uncaptured.length} intents requiring capture.`);
+    console.log(`🔄 Found ${uncaptured.length} manual intents requiring capture.`);
 
     const results = [];
     for (const pi of uncaptured) {
