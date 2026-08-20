@@ -3,6 +3,7 @@ const express = require("express");
 const router = express.Router();
 const Stripe = require("stripe");
 const axios = require("axios");
+const syncro = require("../services/syncroService");
 
 router.use(express.json());
 
@@ -28,23 +29,25 @@ router.post("/send-payment-email", async (req, res) => {
       return res.status(400).json({ success: false, error: "Missing invoiceId." });
     }
 
-    // 2. Fetch Syncro Invoice
+    // 2. Fetch Syncro Invoice & Check Shop Supplies
     const syncroSubdomain = process.env.SYNCRO_SUBDOMAIN;
     const syncroApiKey = process.env.SYNCRO_API_KEY;
 
     console.log(`➡️ [3/5] Fetching Syncro Invoice #${invoiceId}...`);
-    const syncroRes = await axios.get(
-      `https://${syncroSubdomain}.syncromsp.com/api/v1/invoices/${invoiceId}?api_key=${syncroApiKey}`,
-      { timeout: 8000 }
-    );
+    let invoice = await syncro.getInvoice(invoiceId);
 
-    const invoice = syncroRes.data?.invoice;
     if (!invoice) {
       console.log("❌ Syncro Invoice not found");
       return res.status(404).json({ success: false, error: "Syncro invoice not found." });
     }
 
-    if (invoice.paid || invoice.balance_due <= 0) {
+    // ⚡ Check for labor and auto-inject Shop Supplies from inventory if needed
+    const wasAdded = await syncro.ensureShopSupplies(invoiceId, invoice.line_items || []);
+    if (wasAdded) {
+      invoice = await syncro.getInvoice(invoiceId);
+    }
+
+    if (invoice.paid || (invoice.balance_due !== undefined && invoice.balance_due <= 0)) {
       console.log("⚠️ Invoice already paid or 0 balance");
       return res.status(400).json({ success: false, error: "Invoice is already paid or has no balance due." });
     }
@@ -55,11 +58,8 @@ router.post("/send-payment-email", async (req, res) => {
 
     if (!customerEmail && targetCustomerId) {
       try {
-        const custRes = await axios.get(
-          `https://${syncroSubdomain}.syncromsp.com/api/v1/customers/${targetCustomerId}?api_key=${syncroApiKey}`,
-          { timeout: 8000 }
-        );
-        customerEmail = custRes.data?.customer?.email;
+        const custRes = await syncro.getCustomer(targetCustomerId);
+        customerEmail = custRes?.email || custRes?.customer?.email;
       } catch (cErr) {
         console.warn("⚠️ Customer lookup fallback failed:", cErr.message);
       }
@@ -75,7 +75,8 @@ router.post("/send-payment-email", async (req, res) => {
       req.socket?.remoteAddress ||
       "";
 
-    const amountInCents = Math.round((invoice.balance_due || amount) * 100);
+    const currentBalance = invoice.balance_due !== undefined ? invoice.balance_due : invoice.total;
+    const amountInCents = Math.round((currentBalance || amount) * 100);
 
     // 3. Create Stripe Checkout Session with manual capture
     console.log(`➡️ [4/5] Creating Stripe Checkout Session ($${(amountInCents / 100).toFixed(2)})...`);
