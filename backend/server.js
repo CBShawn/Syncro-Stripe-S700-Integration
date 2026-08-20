@@ -19,6 +19,8 @@ const paymentEmailRoute = require("./routes/paymentEmail");
 const receiptRoute = require("./routes/receipt");
 const captureRoutes = require("./routes/capture");
 
+const { initCronJobs } = require("./services/cron");
+
 const app = express();
 const PORT = config.PORT || process.env.PORT || 3000;
 
@@ -56,4 +58,5 @@ app.get("/", (req, res) => {
 
 app.listen(PORT, "0.0.0.0", () => {
   console.log(`Server running on port ${PORT}`);
+  initCronJobs();
 });
