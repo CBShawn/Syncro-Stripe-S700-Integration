@@ -5,25 +5,28 @@ const Stripe = require("stripe");
 const stripe = new Stripe(process.env.STRIPE_SECRET_KEY);
 
 function initCronJobs() {
-  // Runs every day at 11:00 PM Eastern Time
+  // Runs every day at 11:00 PM Eastern Time (America/New_York)
   cron.schedule(
     "0 23 * * *",
     async () => {
-      console.log("⏰ [CRON] 11:00 PM Nightly sweep: Checking for uncaptured Stripe payments...");
+      console.log("⏰ [CRON] 11:00 PM Nightly sweep: Checking for manual-capture Stripe payments...");
 
       try {
         const list = await stripe.paymentIntents.list({
           limit: 100,
         });
 
-        const uncaptured = list.data.filter((pi) => pi.status === "requires_capture");
+        // Strict filter: only capture intents explicitly set to manual that are pending capture
+        const uncaptured = list.data.filter(
+          (pi) => pi.status === "requires_capture" && pi.capture_method === "manual"
+        );
 
         if (uncaptured.length === 0) {
-          console.log("⏰ [CRON] No payments requiring capture found.");
+          console.log("⏰ [CRON] No manual-capture payments requiring capture found.");
           return;
         }
 
-        console.log(`⏰ [CRON] Found ${uncaptured.length} payment(s) to capture.`);
+        console.log(`⏰ [CRON] Found ${uncaptured.length} manual-capture payment(s) to capture.`);
 
         for (const pi of uncaptured) {
           try {
