@@ -75,36 +75,47 @@ router.post("/pay-and-sign", async (req, res) => {
       syncroCustomerId = invoiceCustomerCache.get(syncroInvoiceId);
     }
 
-    const hasExplicitAmount = (body.amountCents !== undefined && body.amountCents !== null) || rawAmount !== undefined;
-    const needsLineItems = !lineItems || !Array.isArray(lineItems) || lineItems.length === 0;
+    // Always fetch invoice to verify labor and ensure Shop Supplies is injected if applicable
+    console.log(`ℹ️ Checking Invoice #${syncroInvoiceId} via Syncro API...`);
+    try {
+      let invoiceData = await syncro.getInvoice(syncroInvoiceId);
 
-    if (!hasExplicitAmount || !syncroCustomerId || !customerEmail || needsLineItems) {
-      console.log(`ℹ️ Fetching Invoice #${syncroInvoiceId} directly from Syncro API to fill missing data...`);
-      try {
-        const invoiceData = await syncro.getInvoice(syncroInvoiceId);
-        
-        if (invoiceData) {
-          if (!hasExplicitAmount) {
-            rawAmount = invoiceData.balance_due !== undefined ? invoiceData.balance_due : invoiceData.total;
-          }
-          if (!syncroCustomerId) syncroCustomerId = invoiceData.customer_id || invoiceData.customer?.id;
-          if (invoiceData.customer) {
-            customerName = invoiceData.customer.fullname || invoiceData.customer.business_name || customerName;
-            if (!customerEmail) customerEmail = invoiceData.customer.email;
-          }
-          if (needsLineItems && invoiceData.line_items) {
-            lineItems = invoiceData.line_items.map(item => {
-              const price = parseFloat(item.total || item.price || item.unit_price || 0);
-              return {
-                description: item.name || item.description || "Service Item",
-                amount: Math.round(price * 100)
-              };
-            });
-          }
+      if (invoiceData) {
+        // ⚡ Check for labor and auto-inject Shop Supplies from Syncro inventory
+        const wasAdded = await syncro.ensureShopSupplies(
+          syncroInvoiceId,
+          invoiceData.line_items || lineItems
+        );
+
+        // If added, refresh invoiceData so totals and line items reflect the newly added supply fee
+        if (wasAdded) {
+          invoiceData = await syncro.getInvoice(syncroInvoiceId);
         }
-      } catch (syncroErr) {
-        console.error("❌ Failed to fetch invoice details from Syncro API:", syncroErr.response?.data || syncroErr.message);
+
+        // Map fresh totals and details
+        rawAmount = invoiceData.balance_due !== undefined ? invoiceData.balance_due : invoiceData.total;
+        
+        if (!syncroCustomerId) {
+          syncroCustomerId = invoiceData.customer_id || invoiceData.customer?.id;
+        }
+
+        if (invoiceData.customer) {
+          customerName = invoiceData.customer.fullname || invoiceData.customer.business_name || customerName;
+          if (!customerEmail) customerEmail = invoiceData.customer.email;
+        }
+
+        if (invoiceData.line_items && Array.isArray(invoiceData.line_items)) {
+          lineItems = invoiceData.line_items.map((item) => {
+            const price = parseFloat(item.total || item.price || item.unit_price || 0);
+            return {
+              description: item.name || item.description || "Service Item",
+              amount: Math.round(price * 100),
+            };
+          });
+        }
       }
+    } catch (syncroErr) {
+      console.error("❌ Failed to process invoice details with Syncro API:", syncroErr.response?.data || syncroErr.message);
     }
 
     if (syncroInvoiceId && syncroCustomerId && syncroCustomerId !== "undefined") {
@@ -112,14 +123,14 @@ router.post("/pay-and-sign", async (req, res) => {
     }
 
     let amountCents = 0;
-    if (body.amountCents !== undefined && body.amountCents !== null) {
-      amountCents = parseInt(body.amountCents, 10);
-    } else if (rawAmount !== undefined && rawAmount !== null) {
+    if (rawAmount !== undefined && rawAmount !== null) {
       if (typeof rawAmount === "string") rawAmount = rawAmount.replace(/[^0-9.]/g, "");
       const parsedFloat = parseFloat(rawAmount);
       if (!isNaN(parsedFloat) && parsedFloat > 0) {
         amountCents = Math.round(parsedFloat * 100);
       }
+    } else if (body.amountCents !== undefined && body.amountCents !== null) {
+      amountCents = parseInt(body.amountCents, 10);
     }
 
     if (!readerId || !amountCents || amountCents <= 0) {
