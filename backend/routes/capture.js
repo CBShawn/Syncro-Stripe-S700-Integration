@@ -5,7 +5,26 @@ const Stripe = require("stripe");
 
 const stripe = new Stripe(process.env.STRIPE_SECRET_KEY);
 
-// 1. Capture a single PaymentIntent
+// =========================================================================
+// API KEY AUTHENTICATION MIDDLEWARE
+// =========================================================================
+const authenticateAPI = (req, res, next) => {
+  const apiKey = req.headers["x-api-key"] || req.headers["x-extension-key"];
+  const secretKey = process.env.INTERNAL_API_KEY || process.env.EXTENSION_AUTH_KEY;
+
+  if (!secretKey || apiKey !== secretKey) {
+    console.warn("🚫 Unauthorized attempt on protected capture endpoint.");
+    return res.status(401).json({ success: false, error: "Unauthorized: Invalid or missing API key." });
+  }
+  next();
+};
+
+// Apply auth to all routes in this router
+router.use(authenticateAPI);
+
+// =========================================================================
+// 1. CAPTURE SINGLE PAYMENTINTENT
+// =========================================================================
 router.post("/capture/:paymentIntentId", async (req, res) => {
   const { paymentIntentId } = req.params;
   try {
@@ -18,7 +37,9 @@ router.post("/capture/:paymentIntentId", async (req, res) => {
   }
 });
 
-// 2. Cancel an uncaptured PaymentIntent ($0 fee)
+// =========================================================================
+// 2. CANCEL UNCAPTURED PAYMENTINTENT ($0 FEE)
+// =========================================================================
 router.post("/cancel/:paymentIntentId", async (req, res) => {
   const { paymentIntentId } = req.params;
   try {
@@ -31,12 +52,14 @@ router.post("/cancel/:paymentIntentId", async (req, res) => {
   }
 });
 
-// 3. Batch Capture all pending manual authorizations
+// =========================================================================
+// 3. BATCH CAPTURE ALL MANUAL AUTHORIZATIONS
+// =========================================================================
 router.post("/capture-all", async (req, res) => {
   try {
     const list = await stripe.paymentIntents.list({ limit: 100 });
     
-    // Strict filter: only capture manual holds
+    // Strict filter: only capture manual holds pending capture
     const uncaptured = list.data.filter(
       (pi) => pi.status === "requires_capture" && pi.capture_method === "manual"
     );
