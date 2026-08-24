@@ -10,6 +10,19 @@ async function getInvoice(invoiceId) {
   return result.data?.invoice || result.data;
 }
 
+async function updateInvoice(invoiceId, payload) {
+  const result = await axios.put(
+    `${base}/invoices/${invoiceId}?api_key=${config.SYNCRO_API_KEY}`,
+    payload,
+    {
+      headers: {
+        "Content-Type": "application/json",
+      },
+    }
+  );
+  return result.data?.invoice || result.data;
+}
+
 async function createPayment(payload) {
   const result = await axios.post(
     `${base}/payments?api_key=${config.SYNCRO_API_KEY}`,
@@ -116,6 +129,7 @@ async function ensureShopSupplies(invoiceId, existingLineItems = []) {
 
 module.exports = {
   getInvoice,
+  updateInvoice,
   createPayment,
   getCustomer,
   ensureShopSupplies,
