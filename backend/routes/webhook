@@ -47,6 +47,55 @@ async function fetchStripeSignatureBase64(fileId, retries = 3) {
   return null;
 }
 
+/**
+ * Builds the comprehensive transaction note string for Syncro Invoices
+ */
+function buildSyncroInvoiceNote({
+  isTerminal = false,
+  resolvedClientIp = null,
+  stripePaymentIntentId = null,
+  chargeId = null,
+  cardInfo = {},
+  usBankAccount = {},
+  currency = "usd",
+  amountCents = 0,
+  amountReceivedCents = 0,
+  cleanSigFileId = null,
+  signatureUrl = null,
+  receiptUrl = null,
+}) {
+  const notestring = [
+    isTerminal ? `Stripe Terminal Payment` : `Stripe Online Payment`,
+    resolvedClientIp ? `Client IP: ${resolvedClientIp}` : null,
+    `PaymentIntent: ${stripePaymentIntentId || "N/A"}`,
+    `Charge: ${chargeId || "N/A"}`,
+    usBankAccount.bank_name
+      ? `ACH Bank: ${usBankAccount.bank_name}`
+      : `Card: ${cardInfo.description || cardInfo.brand || "N/A"}`,
+    `Card Type: ${cardInfo.brand || "N/A"}`,
+    `Cardholder: ${cardInfo.cardholder_name || "N/A"}`,
+    `Last 4: ****${usBankAccount.last4 || cardInfo.last4 || "N/A"}`,
+    `Funding: ${cardInfo.funding || "N/A"}`,
+    `Issuer: ${cardInfo.issuer || "N/A"}`,
+    `Country: ${cardInfo.country || "N/A"}`,
+    `Expiration: ${
+      cardInfo.exp_month
+        ? String(cardInfo.exp_month).padStart(2, "0")
+        : "N/A"
+    }/${cardInfo.exp_year || "N/A"}`,
+    `Currency: ${(currency || "usd").toUpperCase()}`,
+    `Amount: $${(amountCents / 100).toFixed(2)}`,
+    `Amount Received: $${(amountReceivedCents / 100).toFixed(2)}`,
+    cleanSigFileId ? `Signature File: ${cleanSigFileId}` : null,
+    signatureUrl ? `Signature URL: ${signatureUrl}` : null,
+    receiptUrl ? `Receipt: ${receiptUrl}` : null,
+  ]
+    .filter(Boolean)
+    .join("\n");
+
+  return notestring;
+}
+
 router.post(
   "/",
   express.raw({ type: "application/json" }),
@@ -156,11 +205,46 @@ router.post(
                 paymentId: syncroPaymentId,
               });
 
-              // ⚡ Update Syncro Invoice Note with receipt URL & transaction ID
+              // Fetch full PaymentIntent details to construct rich note
               try {
-                const receiptUrl = `https://${req.get("host") || "syncro-stripe-s700-integration.onrender.com"}/receipt/${pending.syncroInvoiceId}`;
+                const fullPi = await stripe.paymentIntents.retrieve(paymentIntentId, {
+                  expand: ["latest_charge", "payment_method"],
+                });
+
+                const charge = typeof fullPi.latest_charge === "object" ? fullPi.latest_charge : null;
+                const pm = typeof fullPi.payment_method === "object" ? fullPi.payment_method : {};
+                const card = pm.card_present || pm.card || charge?.payment_method_details?.card_present || charge?.payment_method_details?.card || {};
+
+                const baseUrl = `https://${req.get("host") || "syncro-stripe-s700-integration.onrender.com"}`;
+                const receiptUrl = `${baseUrl}/receipt/${pending.syncroInvoiceId}`;
+                const signatureUrl = fileId ? `${baseUrl}/signature/${pending.syncroInvoiceId}` : null;
+
+                const detailedNote = buildSyncroInvoiceNote({
+                  isTerminal: true,
+                  resolvedClientIp: charge?.client_ip || null,
+                  stripePaymentIntentId: paymentIntentId,
+                  chargeId: charge?.id || fullPi.latest_charge,
+                  cardInfo: {
+                    brand: card.brand,
+                    description: card.description || card.brand,
+                    cardholder_name: card.cardholder_name || card.holder_name,
+                    last4: card.last4,
+                    funding: card.funding,
+                    issuer: card.issuer || card.network,
+                    country: card.country,
+                    exp_month: card.exp_month,
+                    exp_year: card.exp_year,
+                  },
+                  currency: fullPi.currency,
+                  amountCents: fullPi.amount,
+                  amountReceivedCents: fullPi.amount_received || fullPi.amount,
+                  cleanSigFileId: fileId,
+                  signatureUrl: signatureUrl,
+                  receiptUrl: receiptUrl,
+                });
+
                 await syncro.updateInvoice(pending.syncroInvoiceId, {
-                  note: `Paid via Stripe Terminal S700 ($${pending.amountString})\nTxID: ${pending.paymentIntentId}\nReceipt: ${receiptUrl}`,
+                  note: detailedNote,
                 });
               } catch (noteErr) {
                 console.warn(`⚠️ Could not update note on Invoice #${pending.syncroInvoiceId}:`, noteErr.message);
@@ -227,11 +311,45 @@ router.post(
                   paymentId: res?.payment?.id || null,
                 });
 
-                // ⚡ Update Syncro Invoice Note on signature timeout
+                // Update detailed note on signature timeout
                 try {
-                  const receiptUrl = `https://${req.get("host") || "syncro-stripe-s700-integration.onrender.com"}/receipt/${pending.syncroInvoiceId}`;
+                  const fullPi = await stripe.paymentIntents.retrieve(pi.id, {
+                    expand: ["latest_charge", "payment_method"],
+                  });
+
+                  const charge = typeof fullPi.latest_charge === "object" ? fullPi.latest_charge : null;
+                  const pm = typeof fullPi.payment_method === "object" ? fullPi.payment_method : {};
+                  const card = pm.card_present || pm.card || charge?.payment_method_details?.card_present || charge?.payment_method_details?.card || {};
+
+                  const baseUrl = `https://${req.get("host") || "syncro-stripe-s700-integration.onrender.com"}`;
+                  const receiptUrl = `${baseUrl}/receipt/${pending.syncroInvoiceId}`;
+
+                  const detailedNote = buildSyncroInvoiceNote({
+                    isTerminal: true,
+                    resolvedClientIp: charge?.client_ip || null,
+                    stripePaymentIntentId: pi.id,
+                    chargeId: charge?.id || fullPi.latest_charge,
+                    cardInfo: {
+                      brand: card.brand,
+                      description: card.description || card.brand,
+                      cardholder_name: card.cardholder_name || card.holder_name,
+                      last4: card.last4,
+                      funding: card.funding,
+                      issuer: card.issuer || card.network,
+                      country: card.country,
+                      exp_month: card.exp_month,
+                      exp_year: card.exp_year,
+                    },
+                    currency: fullPi.currency,
+                    amountCents: fullPi.amount,
+                    amountReceivedCents: fullPi.amount_received || fullPi.amount,
+                    cleanSigFileId: null,
+                    signatureUrl: null,
+                    receiptUrl: receiptUrl,
+                  });
+
                   await syncro.updateInvoice(pending.syncroInvoiceId, {
-                    note: `Paid via Stripe Terminal S700 ($${pending.amountString})\nTxID: ${pending.paymentIntentId}\nReceipt: ${receiptUrl}`,
+                    note: detailedNote,
                   });
                 } catch (noteErr) {
                   console.warn(`⚠️ Could not update note on Invoice #${pending.syncroInvoiceId}:`, noteErr.message);
@@ -299,31 +417,66 @@ router.post(
         const paymentIntentId = session.payment_intent ? String(session.payment_intent) : session.id;
 
         let clientIp = metadata.client_ip || session.customer_details?.ip_address || "";
+        let fullPi = null;
+        let charge = null;
+        let card = {};
+        let usBankAccount = {};
 
         if (session.payment_intent && typeof session.payment_intent === "string") {
           try {
-            const pi = await stripe.paymentIntents.retrieve(session.payment_intent, {
-              expand: ["latest_charge", "charges.data"],
+            fullPi = await stripe.paymentIntents.retrieve(session.payment_intent, {
+              expand: ["latest_charge", "payment_method"],
             });
 
-            if (pi.latest_charge && typeof pi.latest_charge === "object") {
-              clientIp = pi.latest_charge.client_ip || clientIp;
-            } else if (pi.charges?.data && pi.charges.data.length > 0) {
-              clientIp = pi.charges.data[0].client_ip || clientIp;
-            } else if (typeof pi.latest_charge === "string") {
-              const directCharge = await stripe.charges.retrieve(pi.latest_charge);
-              clientIp = directCharge.client_ip || clientIp;
+            if (fullPi.latest_charge && typeof fullPi.latest_charge === "object") {
+              charge = fullPi.latest_charge;
+              clientIp = charge.client_ip || clientIp;
             }
+
+            const pm = typeof fullPi.payment_method === "object" ? fullPi.payment_method : {};
+            card = pm.card || charge?.payment_method_details?.card || {};
+            usBankAccount = pm.us_bank_account || charge?.payment_method_details?.us_bank_account || {};
           } catch (e) {
-            console.warn("⚠️ Could not fetch Charge client_ip:", e.message);
+            console.warn("⚠️ Could not fetch PaymentIntent details for note:", e.message);
           }
         }
 
         if (syncroInvoiceId) {
+          const baseUrl = `https://${req.get("host") || "syncro-stripe-s700-integration.onrender.com"}`;
+          const receiptUrl = `${baseUrl}/receipt/${syncroInvoiceId}`;
+
+          const detailedNote = buildSyncroInvoiceNote({
+            isTerminal: false,
+            resolvedClientIp: clientIp,
+            stripePaymentIntentId: paymentIntentId,
+            chargeId: charge?.id || fullPi?.latest_charge || "N/A",
+            cardInfo: {
+              brand: card.brand,
+              description: card.description || card.brand,
+              cardholder_name: card.cardholder_name || card.name || session.customer_details?.name,
+              last4: card.last4,
+              funding: card.funding,
+              issuer: card.issuer || card.network,
+              country: card.country,
+              exp_month: card.exp_month,
+              exp_year: card.exp_year,
+            },
+            usBankAccount: {
+              bank_name: usBankAccount.bank_name,
+              last4: usBankAccount.last4,
+            },
+            currency: session.currency || "usd",
+            amountCents: session.amount_total,
+            amountReceivedCents: session.payment_status === "paid" ? session.amount_total : 0,
+            cleanSigFileId: null,
+            signatureUrl: null,
+            receiptUrl: receiptUrl,
+          });
+
           // If payment is pending bank clearance (ACH)
           if (session.payment_status !== "paid") {
             console.log(`⏳ ACH payment processing for Invoice #${syncroInvoiceId}. Updating status to pending...`);
-            
+
             invoicePaymentStatus.set(syncroInvoiceId, {
               status: "pending_ach",
               stage: "ach_clearing",
@@ -332,13 +485,13 @@ router.post(
 
             try {
               await syncro.updateInvoice(syncroInvoiceId, {
-                note: `Stripe ACH Payment Initiated ($${amountString})\nTxID: ${paymentIntentId}\nStatus: Clearing with bank (3-5 business days)`,
+                note: `[ACH PENDING CLEARANCE - 3-5 BUSINESS DAYS]\n${detailedNote}`,
               });
             } catch (noteErr) {
               console.warn("⚠️ Could not post ACH pending note:", noteErr.message);
             }
           } else {
-            // Card payment completed
+            // Instant payment (Credit/Debit Card)
             try {
               const payRes = await recordSyncroPayment(
                 syncroInvoiceId,
@@ -360,14 +513,13 @@ router.post(
 
               invoiceCustomerCache.delete(syncroInvoiceId);
 
-              // ⚡ Update Syncro Invoice Note with receipt URL & IP details
-              const receiptUrl = `https://${req.get("host") || "syncro-stripe-s700-integration.onrender.com"}/receipt/${syncroInvoiceId}`;
+              // ⚡ Post full note to Syncro Invoice
               await syncro.updateInvoice(syncroInvoiceId, {
-                note: `Paid online via Stripe Checkout ($${amountString})\nTxID: ${paymentIntentId}\nClient IP: ${clientIp || "N/A"}\nReceipt: ${receiptUrl}`,
+                note: detailedNote,
               });
 
               console.log(
-                `✅ Posted online payment of $${amountString} to Syncro Invoice #${syncroInvoiceId} (Client IP: ${clientIp || "None"})`
+                `✅ Posted online payment of $${amountString} and full note to Syncro Invoice #${syncroInvoiceId}`
               );
             } catch (syncroErr) {
               console.error(
