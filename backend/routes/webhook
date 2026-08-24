@@ -6,6 +6,8 @@ const Stripe = require("stripe");
 const router = express.Router();
 const stripe = Stripe(process.env.STRIPE_SECRET_KEY);
 
+const syncro = require("../services/syncroService");
+
 const {
   invoicePaymentStatus,
   pendingSyncroPayments,
@@ -20,23 +22,29 @@ const {
 
 const STRIPE_WEBHOOK_SECRET = process.env.STRIPE_WEBHOOK_SECRET;
 
-async function fetchStripeSignatureBase64(fileId) {
+async function fetchStripeSignatureBase64(fileId, retries = 3) {
   if (!fileId) return null;
-  try {
-    const res = await axios.get(`https://api.stripe.com/v1/files/${fileId}/contents`, {
-      headers: {
-        Authorization: `Bearer ${process.env.STRIPE_SECRET_KEY}`,
-      },
-      responseType: "arraybuffer",
-      timeout: 6000,
-    });
-    const contentType = res.headers["content-type"] || "image/svg+xml";
-    const base64 = Buffer.from(res.data, "binary").toString("base64");
-    return `data:${contentType};base64,${base64}`;
-  } catch (err) {
-    console.warn(`⚠️ Could not fetch Stripe file contents for ${fileId}:`, err.message);
-    return null;
+  for (let attempt = 1; attempt <= retries; attempt++) {
+    try {
+      await new Promise((resolve) => setTimeout(resolve, attempt * 500));
+      const res = await axios.get(`https://api.stripe.com/v1/files/${fileId}/contents`, {
+        headers: {
+          Authorization: `Bearer ${process.env.STRIPE_SECRET_KEY}`,
+        },
+        responseType: "arraybuffer",
+        timeout: 6000,
+      });
+      const contentType = res.headers["content-type"] || "image/svg+xml";
+      const base64 = Buffer.from(res.data, "binary").toString("base64");
+      return `data:${contentType};base64,${base64}`;
+    } catch (err) {
+      if (attempt === retries) {
+        console.warn(`⚠️ Could not fetch Stripe file contents for ${fileId}:`, err.message);
+        return null;
+      }
+    }
   }
+  return null;
 }
 
 router.post(
@@ -148,6 +156,16 @@ router.post(
                 paymentId: syncroPaymentId,
               });
 
+              // ⚡ Update Syncro Invoice Note with receipt URL & transaction ID
+              try {
+                const receiptUrl = `https://${req.get("host") || "syncro-stripe-s700-integration.onrender.com"}/receipt/${pending.syncroInvoiceId}`;
+                await syncro.updateInvoice(pending.syncroInvoiceId, {
+                  note: `Paid via Stripe Terminal S700 ($${pending.amountString})\nTxID: ${pending.paymentIntentId}\nReceipt: ${receiptUrl}`,
+                });
+              } catch (noteErr) {
+                console.warn(`⚠️ Could not update note on Invoice #${pending.syncroInvoiceId}:`, noteErr.message);
+              }
+
               await clearTerminalReaderDisplay(pending.readerId || readerObj.id);
               invoiceCustomerCache.delete(String(pending.syncroInvoiceId));
 
@@ -209,6 +227,16 @@ router.post(
                   paymentId: res?.payment?.id || null,
                 });
 
+                // ⚡ Update Syncro Invoice Note on signature timeout
+                try {
+                  const receiptUrl = `https://${req.get("host") || "syncro-stripe-s700-integration.onrender.com"}/receipt/${pending.syncroInvoiceId}`;
+                  await syncro.updateInvoice(pending.syncroInvoiceId, {
+                    note: `Paid via Stripe Terminal S700 ($${pending.amountString})\nTxID: ${pending.paymentIntentId}\nReceipt: ${receiptUrl}`,
+                  });
+                } catch (noteErr) {
+                  console.warn(`⚠️ Could not update note on Invoice #${pending.syncroInvoiceId}:`, noteErr.message);
+                }
+
                 await clearTerminalReaderDisplay(pending.readerId);
                 invoiceCustomerCache.delete(String(pending.syncroInvoiceId));
               }
@@ -258,7 +286,7 @@ router.post(
       }
 
       // ================================================================
-      // 3. ONLINE CHECKOUT SESSION
+      // 3. ONLINE CHECKOUT SESSION (Card or ACH)
       // ================================================================
       if (event.type === "checkout.session.completed") {
         const session = event.data.object;
@@ -292,35 +320,61 @@ router.post(
         }
 
         if (syncroInvoiceId) {
-          try {
-            const payRes = await recordSyncroPayment(
-              syncroInvoiceId,
-              syncroCustomerId,
-              amountString,
-              paymentIntentId,
-              null,
-              null,
-              "Stripe Web",
-              clientIp
-            );
-
+          // If payment is pending bank clearance (ACH)
+          if (session.payment_status !== "paid") {
+            console.log(`⏳ ACH payment processing for Invoice #${syncroInvoiceId}. Updating status to pending...`);
+            
             invoicePaymentStatus.set(syncroInvoiceId, {
-              status: "paid",
+              status: "pending_ach",
+              stage: "ach_clearing",
               amount: amountString,
-              paymentId: payRes?.payment?.id || null,
-              clientIp: clientIp || null,
             });
 
-            invoiceCustomerCache.delete(syncroInvoiceId);
+            try {
+              await syncro.updateInvoice(syncroInvoiceId, {
+                note: `Stripe ACH Payment Initiated ($${amountString})\nTxID: ${paymentIntentId}\nStatus: Clearing with bank (3-5 business days)`,
+              });
+            } catch (noteErr) {
+              console.warn("⚠️ Could not post ACH pending note:", noteErr.message);
+            }
+          } else {
+            // Card payment completed
+            try {
+              const payRes = await recordSyncroPayment(
+                syncroInvoiceId,
+                syncroCustomerId,
+                amountString,
+                paymentIntentId,
+                null,
+                null,
+                "Stripe Web",
+                clientIp
+              );
 
-            console.log(
-              `✅ Posted online payment of $${amountString} to Syncro Invoice #${syncroInvoiceId} (Client IP: ${clientIp || "None"})`
-            );
-          } catch (syncroErr) {
-            console.error(
-              `❌ Failed to record online payment for Syncro Invoice #${syncroInvoiceId}:`,
-              syncroErr.message
-            );
+              invoicePaymentStatus.set(syncroInvoiceId, {
+                status: "paid",
+                amount: amountString,
+                paymentId: payRes?.payment?.id || null,
+                clientIp: clientIp || null,
+              });
+
+              invoiceCustomerCache.delete(syncroInvoiceId);
+
+              // ⚡ Update Syncro Invoice Note with receipt URL & IP details
+              const receiptUrl = `https://${req.get("host") || "syncro-stripe-s700-integration.onrender.com"}/receipt/${syncroInvoiceId}`;
+              await syncro.updateInvoice(syncroInvoiceId, {
+                note: `Paid online via Stripe Checkout ($${amountString})\nTxID: ${paymentIntentId}\nClient IP: ${clientIp || "N/A"}\nReceipt: ${receiptUrl}`,
+              });
+
+              console.log(
+                `✅ Posted online payment of $${amountString} to Syncro Invoice #${syncroInvoiceId} (Client IP: ${clientIp || "None"})`
+              );
+            } catch (syncroErr) {
+              console.error(
+                `❌ Failed to record online payment for Syncro Invoice #${syncroInvoiceId}:`,
+                syncroErr.message
+              );
+            }
           }
         }
       }
