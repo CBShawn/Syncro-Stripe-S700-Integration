@@ -1,4 +1,408 @@
-// ================================================================
+// routes/webhook.js
+const express = require("express");
+const axios = require("axios");
+const Stripe = require("stripe");
+
+const router = express.Router();
+const stripe = Stripe(process.env.STRIPE_SECRET_KEY);
+
+const syncro = require("../services/syncroService");
+
+const {
+  invoicePaymentStatus,
+  pendingSyncroPayments,
+  invoiceCustomerCache,
+  invoiceSignatureCache,
+} = require("../services/cache");
+
+const {
+  recordSyncroPayment,
+  clearTerminalReaderDisplay,
+} = require("../services/payment");
+
+const STRIPE_WEBHOOK_SECRET = process.env.STRIPE_WEBHOOK_SECRET;
+
+async function fetchStripeSignatureBase64(fileId, retries = 3) {
+  if (!fileId) return null;
+  for (let attempt = 1; attempt <= retries; attempt++) {
+    try {
+      await new Promise((resolve) => setTimeout(resolve, attempt * 500));
+      const res = await axios.get(`https://api.stripe.com/v1/files/${fileId}/contents`, {
+        headers: {
+          Authorization: `Bearer ${process.env.STRIPE_SECRET_KEY}`,
+        },
+        responseType: "arraybuffer",
+        timeout: 6000,
+      });
+      const contentType = res.headers["content-type"] || "image/svg+xml";
+      const base64 = Buffer.from(res.data, "binary").toString("base64");
+      return `data:${contentType};base64,${base64}`;
+    } catch (err) {
+      if (attempt === retries) {
+        console.warn(`⚠️ Could not fetch Stripe file contents for ${fileId}:`, err.message);
+        return null;
+      }
+    }
+  }
+  return null;
+}
+
+/**
+ * Builds the comprehensive transaction note string for Syncro Invoices
+ */
+function buildSyncroInvoiceNote({
+  isTerminal = false,
+  resolvedClientIp = null,
+  stripePaymentIntentId = null,
+  chargeId = null,
+  cardInfo = {},
+  usBankAccount = {},
+  currency = "usd",
+  amountCents = 0,
+  amountReceivedCents = 0,
+  cleanSigFileId = null,
+  signatureUrl = null,
+  receiptUrl = null,
+}) {
+  const notestring = [
+    isTerminal ? `Stripe Terminal Payment` : `Stripe Online Payment`,
+    resolvedClientIp ? `Client IP: ${resolvedClientIp}` : null,
+    `PaymentIntent: ${stripePaymentIntentId || "N/A"}`,
+    `Charge: ${chargeId || "N/A"}`,
+    usBankAccount.bank_name
+      ? `ACH Bank: ${usBankAccount.bank_name}`
+      : `Card: ${cardInfo.description || cardInfo.brand || "N/A"}`,
+    `Card Type: ${cardInfo.brand || "N/A"}`,
+    `Cardholder: ${cardInfo.cardholder_name || "N/A"}`,
+    `Last 4: ****${usBankAccount.last4 || cardInfo.last4 || "N/A"}`,
+    `Funding: ${cardInfo.funding || "N/A"}`,
+    `Issuer: ${cardInfo.issuer || "N/A"}`,
+    `Country: ${cardInfo.country || "N/A"}`,
+    `Expiration: ${
+      cardInfo.exp_month
+        ? String(cardInfo.exp_month).padStart(2, "0")
+        : "N/A"
+    }/${cardInfo.exp_year || "N/A"}`,
+    `Currency: ${(currency || "usd").toUpperCase()}`,
+    `Amount: $${(amountCents / 100).toFixed(2)}`,
+    `Amount Received: $${(amountReceivedCents / 100).toFixed(2)}`,
+    cleanSigFileId ? `Signature File: ${cleanSigFileId}` : null,
+    signatureUrl ? `Signature URL: ${signatureUrl}` : null,
+    receiptUrl ? `Receipt: ${receiptUrl}` : null,
+  ]
+    .filter(Boolean)
+    .join("\n");
+
+  return notestring;
+}
+
+router.post(
+  "/",
+  express.raw({ type: "application/json" }),
+  async (req, res) => {
+    const sig = req.headers["stripe-signature"];
+    let event;
+
+    try {
+      if (STRIPE_WEBHOOK_SECRET) {
+        event = stripe.webhooks.constructEvent(
+          req.body,
+          sig,
+          STRIPE_WEBHOOK_SECRET
+        );
+      } else {
+        event = JSON.parse(req.body.toString());
+      }
+    } catch (err) {
+      console.error(`❌ Webhook Signature Verification Failed: ${err.message}`);
+      return res.status(400).send(`Webhook Error: ${err.message}`);
+    }
+
+    console.log(`✅ Webhook Received: ${event.type}`);
+
+    try {
+      // ================================================================
+      // 1. S700 ON-SCREEN SIGNATURE COMPLETED -> POST TO SYNCRO
+      // ================================================================
+      if (event.type === "terminal.reader.action_succeeded") {
+        const readerObj = event.data.object;
+        const readerId = String(readerObj.id);
+        const action = readerObj.action || {};
+        const actionType = action.type;
+
+        console.log(`📋 Reader action succeeded: ${actionType} on Reader ${readerId}`);
+
+        if (actionType === "collect_inputs") {
+          const metadata =
+            action.collect_inputs?.metadata ||
+            readerObj.metadata ||
+            {};
+
+          const paymentIntentId = metadata.payment_intent_id;
+          let fileId = null;
+
+          const collectInputs =
+            action.collect_inputs?.inputs ||
+            action.process_input?.inputs ||
+            [];
+
+          for (const input of collectInputs) {
+            if (input.type === "signature") {
+              fileId =
+                input.signature?.value ||
+                input.value ||
+                input.signature;
+              if (fileId) break;
+            }
+          }
+
+          if (!fileId && readerObj.action?.collect_inputs) {
+            fileId = readerObj.action.collect_inputs.value;
+          }
+
+          if (paymentIntentId) {
+            let base64Sig = null;
+            if (fileId) {
+              try {
+                await stripe.paymentIntents.update(paymentIntentId, {
+                  metadata: {
+                    stripe_signature_file_id: String(fileId),
+                    signed_at: new Date().toISOString(),
+                  },
+                });
+
+                base64Sig = await fetchStripeSignatureBase64(fileId);
+              } catch (updateErr) {
+                console.error("⚠️ Failed to update PaymentIntent with signature file ID:", updateErr.message);
+              }
+            }
+
+            const pending = pendingSyncroPayments.get(String(paymentIntentId));
+
+            if (pending) {
+              pendingSyncroPayments.delete(String(paymentIntentId));
+
+              if (base64Sig) {
+                invoiceSignatureCache.set(String(pending.syncroInvoiceId), base64Sig);
+              }
+
+              const syncroPaymentRes = await recordSyncroPayment(
+                pending.syncroInvoiceId,
+                pending.syncroCustomerId,
+                pending.amountString,
+                pending.paymentIntentId,
+                null,
+                fileId,
+                "Stripe Terminal",
+                null
+              );
+
+              const syncroPaymentId = syncroPaymentRes?.payment?.id || null;
+
+              invoicePaymentStatus.set(String(pending.syncroInvoiceId), {
+                status: "paid",
+                amount: pending.amountString,
+                paymentId: syncroPaymentId,
+              });
+
+              // Construct full detailed note
+              try {
+                const fullPi = await stripe.paymentIntents.retrieve(paymentIntentId, {
+                  expand: ["latest_charge", "payment_method"],
+                });
+
+                const charge = typeof fullPi.latest_charge === "object" ? fullPi.latest_charge : null;
+                const pm = typeof fullPi.payment_method === "object" ? fullPi.payment_method : {};
+                const card = pm.card_present || pm.card || charge?.payment_method_details?.card_present || charge?.payment_method_details?.card || {};
+
+                const baseUrl = `https://${req.get("host") || "syncro-stripe-s700-integration.onrender.com"}`;
+                const receiptUrl = `${baseUrl}/receipt/${pending.syncroInvoiceId}`;
+                const signatureUrl = fileId ? `${baseUrl}/signature/${pending.syncroInvoiceId}` : null;
+
+                const detailedNote = buildSyncroInvoiceNote({
+                  isTerminal: true,
+                  resolvedClientIp: charge?.client_ip || null,
+                  stripePaymentIntentId: paymentIntentId,
+                  chargeId: charge?.id || fullPi.latest_charge,
+                  cardInfo: {
+                    brand: card.brand,
+                    description: card.description || card.brand,
+                    cardholder_name: card.cardholder_name || card.holder_name,
+                    last4: card.last4,
+                    funding: card.funding,
+                    issuer: card.issuer || card.network,
+                    country: card.country,
+                    exp_month: card.exp_month,
+                    exp_year: card.exp_year,
+                  },
+                  currency: fullPi.currency,
+                  amountCents: fullPi.amount,
+                  amountReceivedCents: fullPi.amount_received || fullPi.amount,
+                  cleanSigFileId: fileId,
+                  signatureUrl: signatureUrl,
+                  receiptUrl: receiptUrl,
+                });
+
+                await syncro.updateInvoice(pending.syncroInvoiceId, {
+                  note: detailedNote,
+                });
+              } catch (noteErr) {
+                console.warn(`⚠️ Could not update note on Invoice #${pending.syncroInvoiceId}:`, noteErr.message);
+              }
+
+              await clearTerminalReaderDisplay(pending.readerId || readerObj.id);
+              invoiceCustomerCache.delete(String(pending.syncroInvoiceId));
+
+              console.log(`✅ Recorded S700 signed payment in Syncro for Invoice #${pending.syncroInvoiceId} (Payment ID: ${syncroPaymentId})`);
+            }
+          }
+        }
+      }
+
+      // ================================================================
+      // 2. CARD AUTHORIZED OR CHARGED ON S700 -> PROMPT SIGNATURE
+      // ================================================================
+      if (
+        event.type === "payment_intent.amount_capturable_updated" ||
+        event.type === "payment_intent.succeeded"
+      ) {
+        const pi = event.data.object;
+        const metadata = pi.metadata || {};
+        const readerId = metadata.stripe_reader_id;
+
+        if (!readerId) {
+          console.log(`ℹ️ PaymentIntent ${pi.id} has no stripe_reader_id - skipping terminal signature.`);
+        } else {
+          const syncroInvoiceId = metadata.syncro_invoice_id ? String(metadata.syncro_invoice_id).trim() : null;
+          const syncroCustomerId = metadata.syncro_customer_id ? String(metadata.syncro_customer_id).trim() : null;
+          const amountString = (pi.amount / 100).toFixed(2);
+
+          if (syncroInvoiceId && syncroCustomerId) {
+            pendingSyncroPayments.set(String(pi.id), {
+              syncroInvoiceId,
+              syncroCustomerId,
+              amountString,
+              paymentIntentId: pi.id,
+              readerId,
+            });
+
+            console.log(`💳 Card authorized. Triggering S700 signature screen for PI ${pi.id}...`);
+
+            setTimeout(async () => {
+              const pending = pendingSyncroPayments.get(String(pi.id));
+              if (pending) {
+                pendingSyncroPayments.delete(String(pi.id));
+                console.log(`⏱️ S700 Signature timeout. Posting payment to Syncro anyway...`);
+
+                const res = await recordSyncroPayment(
+                  pending.syncroInvoiceId,
+                  pending.syncroCustomerId,
+                  pending.amountString,
+                  pending.paymentIntentId,
+                  null,
+                  null,
+                  "Stripe Terminal",
+                  null
+                );
+
+                invoicePaymentStatus.set(String(pending.syncroInvoiceId), {
+                  status: "paid",
+                  amount: pending.amountString,
+                  paymentId: res?.payment?.id || null,
+                });
+
+                try {
+                  const fullPi = await stripe.paymentIntents.retrieve(pi.id, {
+                    expand: ["latest_charge", "payment_method"],
+                  });
+
+                  const charge = typeof fullPi.latest_charge === "object" ? fullPi.latest_charge : null;
+                  const pm = typeof fullPi.payment_method === "object" ? fullPi.payment_method : {};
+                  const card = pm.card_present || pm.card || charge?.payment_method_details?.card_present || charge?.payment_method_details?.card || {};
+
+                  const baseUrl = `https://${req.get("host") || "syncro-stripe-s700-integration.onrender.com"}`;
+                  const receiptUrl = `${baseUrl}/receipt/${pending.syncroInvoiceId}`;
+
+                  const detailedNote = buildSyncroInvoiceNote({
+                    isTerminal: true,
+                    resolvedClientIp: charge?.client_ip || null,
+                    stripePaymentIntentId: pi.id,
+                    chargeId: charge?.id || fullPi.latest_charge,
+                    cardInfo: {
+                      brand: card.brand,
+                      description: card.description || card.brand,
+                      cardholder_name: card.cardholder_name || card.holder_name,
+                      last4: card.last4,
+                      funding: card.funding,
+                      issuer: card.issuer || card.network,
+                      country: card.country,
+                      exp_month: card.exp_month,
+                      exp_year: card.exp_year,
+                    },
+                    currency: fullPi.currency,
+                    amountCents: fullPi.amount,
+                    amountReceivedCents: fullPi.amount_received || fullPi.amount,
+                    cleanSigFileId: null,
+                    signatureUrl: null,
+                    receiptUrl: receiptUrl,
+                  });
+
+                  await syncro.updateInvoice(pending.syncroInvoiceId, {
+                    note: detailedNote,
+                  });
+                } catch (noteErr) {
+                  console.warn(`⚠️ Could not update note on Invoice #${pending.syncroInvoiceId}:`, noteErr.message);
+                }
+
+                await clearTerminalReaderDisplay(pending.readerId);
+                invoiceCustomerCache.delete(String(pending.syncroInvoiceId));
+              }
+            }, 25000);
+
+            try {
+              const signaturePayload = new URLSearchParams();
+              signaturePayload.append("inputs[0][type]", "signature");
+              signaturePayload.append("inputs[0][required]", "true");
+              signaturePayload.append(
+                "inputs[0][custom_text][title]",
+                "Work Acceptance & Card Authorization"
+              );
+              signaturePayload.append(
+                "inputs[0][custom_text][description]",
+                `Sign to authorize payment for Invoice #${syncroInvoiceId}.`
+              );
+              signaturePayload.append(
+                "inputs[0][custom_text][submit_button]",
+                "Accept & Sign"
+              );
+              signaturePayload.append(
+                "metadata[payment_intent_id]",
+                pi.id
+              );
+
+              await axios.post(
+                `https://api.stripe.com/v1/terminal/readers/${readerId}/collect_inputs`,
+                signaturePayload.toString(),
+                {
+                  headers: {
+                    Authorization: `Bearer ${process.env.STRIPE_SECRET_KEY}`,
+                    "Content-Type": "application/x-www-form-urlencoded",
+                  },
+                }
+              );
+
+              console.log(`✍️ S700 Reader ${readerId} prompt active.`);
+            } catch (sigErr) {
+              console.error(
+                "❌ Failed to trigger S700 signature prompt:",
+                sigErr.response?.data || sigErr.message
+              );
+            }
+          }
+        }
+      }
+
+      // ================================================================
       // 3. ONLINE CHECKOUT SESSION (Card Auth vs ACH Handling)
       // ================================================================
       if (event.type === "checkout.session.completed") {
@@ -32,8 +436,7 @@
             const pm = typeof fullPi.payment_method === "object" ? fullPi.payment_method : {};
             card = pm.card || charge?.payment_method_details?.card || {};
             usBankAccount = pm.us_bank_account || charge?.payment_method_details?.us_bank_account || {};
-            
-            // Explicitly detect payment method type
+
             paymentType = pm.type || charge?.payment_method_details?.type || (usBankAccount.bank_name ? "us_bank_account" : "card");
           } catch (e) {
             console.warn("⚠️ Could not fetch PaymentIntent details for note:", e.message);
@@ -44,7 +447,7 @@
           const baseUrl = `https://${req.get("host") || "syncro-stripe-s700-integration.onrender.com"}`;
           const receiptUrl = `${baseUrl}/receipt/${syncroInvoiceId}`;
 
-          const isAch = paymentType === "us_bank_account" || !!usBankAccount.bank_name;
+          const isAch = paymentType === "us_bank_account" || Boolean(usBankAccount.bank_name);
 
           const detailedNote = buildSyncroInvoiceNote({
             isTerminal: false,
@@ -74,7 +477,7 @@
             receiptUrl: receiptUrl,
           });
 
-          // ⚡ Check TRUE ACH condition
+          // Check TRUE ACH condition
           if (isAch && session.payment_status !== "paid") {
             console.log(`⏳ True ACH payment processing for Invoice #${syncroInvoiceId}.`);
 
@@ -114,7 +517,7 @@
 
               invoiceCustomerCache.delete(syncroInvoiceId);
 
-              // Update the invoice note with the full card breakdown
+              // Update invoice note with full breakdown
               await syncro.updateInvoice(syncroInvoiceId, {
                 note: detailedNote,
               });
@@ -131,3 +534,12 @@
           }
         }
       }
+    } catch (handlerErr) {
+      console.error("❌ Uncaught Exception inside Webhook Handler:", handlerErr);
+    }
+
+    res.json({ received: true });
+  }
+);
+
+module.exports = router;
