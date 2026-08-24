@@ -161,7 +161,7 @@ async function recordSyncroPayment(
 
     // 4. BUILD NOTES
     const isTerminal = finalPaymentMethod === "Stripe Terminal";
-    const notesstring = [
+    const notestring = [
       isTerminal ? `Stripe Terminal Payment` : `Stripe Online Payment`,
       resolvedClientIp ? `Client IP: ${resolvedClientIp}` : null,
       `PaymentIntent: ${stripePaymentIntentId || "N/A"}`,
@@ -211,7 +211,7 @@ async function recordSyncroPayment(
         payment_method: finalPaymentMethod,
         ref_num: referenceString,
         ip_address: resolvedClientIp || "",
-        notes: notesstring,
+        note: notestring,
         transaction_response: transactionresponse,
         address_state: customerData.state || "",
         address_street: customerData.address || "",
