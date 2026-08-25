@@ -323,13 +323,13 @@ router.get("/:invoiceId", async (req, res) => {
 
       <div class="disclaimer-sec">
         <h2>Disclaimer</h2>
-        <p>Payment Acceptance & Authorization: I agree to pay the total amount indicated above for the parts, diagnostic, and repair services rendered. I acknowledge that all payments are final and non-refundable once the equipment is released. I agree not to initiate a chargeback or dispute for services rendered in accordance with this agreement.
-<BR><BR>
-Inspection & Acceptance: I have inspected the equipment and verify that all requested services and repairs have been completed satisfactorily. I confirm receipt of the equipment and any provided accessories in good working order.
-<BR><BR>
-Data & Liability: I acknowledge that data backup is my responsibility. The service provider is not liable for data loss, corruption, or recovery needs occurring before, during, or after service.
-<BR><BR>
-Limited Warranty: Replaced hardware components and associated labor include a 30-day limited warranty covering defects related directly to the performed repair. This warranty excludes software issues, malware/virus reinfections, accidental damage, liquid intrusion, or subsequent unauthorized tampering.</p>
+        <p>I authorize the total charge indicated above for the diagnostic, parts, and labor services rendered. I acknowledge that all repair services and installed components have been delivered and accepted as described, and that all sales are final subject to the limited warranty terms stated herein.
+        <BR><BR>
+        Inspection & Acceptance: I have inspected the equipment and verify that all requested services and repairs have been completed satisfactorily. I confirm receipt of the equipment and any provided accessories in good working order.
+        <BR><BR>
+        Data & Liability: I acknowledge that data backup is my responsibility. The service provider is not liable for data loss, corruption, or recovery needs occurring before, during, or after service.
+        <BR><BR>
+        Limited Warranty: Replaced hardware components and associated labor include a 30-day limited warranty covering defects related directly to the performed repair. This warranty excludes software issues, malware/virus reinfections, accidental damage, liquid intrusion, or subsequent unauthorized tampering.</p>
       </div>
 
       <!-- Customer Signature Section -->
