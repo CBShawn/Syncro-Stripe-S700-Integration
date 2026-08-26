@@ -211,7 +211,7 @@ async function recordSyncroPayment(
         payment_method: finalPaymentMethod,
         ref_num: referenceString,
         ip_address: resolvedClientIp || "",
-        message: notestring,
+        note: notestring,
         transaction_response: transactionresponse,
         address_state: customerData.state || "",
         address_street: customerData.address || "",
