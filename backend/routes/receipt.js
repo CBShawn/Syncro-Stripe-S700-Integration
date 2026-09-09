@@ -298,7 +298,7 @@ router.get("/:invoiceId", async (req, res) => {
         <tr>
           <th class="first" style="width: 35%;">Item</th>
           <th style="width: 25%;">Desc</th>
-          <th class="unitcost" style="width: 15%;">Cost</th>
+          <th class="unitcost" style="width: 15%;">Price</th>
           <th class="quantity" style="width: 10%;">Qty</th>
           <th class="last linetotal" style="width: 15%;">Total</th>
         </tr>
