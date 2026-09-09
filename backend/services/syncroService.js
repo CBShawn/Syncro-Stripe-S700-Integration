@@ -50,7 +50,7 @@ async function getCustomer(customerId) {
  */
 async function ensureShopSupplies(invoiceId, existingLineItems = []) {
   // 1. Check if the invoice has any Labor items
-  const hasLabor = existingLineItems.some((item) => {
+    const hasLabor = existingLineItems.some((item) => {
     const name = (item.name || "").toLowerCase();
     const desc = (item.description || "").toLowerCase();
    // const category = (item.category || item.product_category || "").toLowerCase();
@@ -61,8 +61,8 @@ async function ensureShopSupplies(invoiceId, existingLineItems = []) {
      // name.includes("labor") ||
      // name.includes("service") ||
      // name.includes("diagnostic") ||
-      name.includes("labor - shop supplies") ||
-      desc.includes("labor - shop supplies")
+      name.includes("extras") ||
+      desc.includes("extras")
     );
   });
 
