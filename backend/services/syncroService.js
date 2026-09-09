@@ -45,24 +45,24 @@ async function getCustomer(customerId) {
 
 /**
  * Ensures "Shop Supplies" is added ONLY if:
- * 1. The invoice contains at least one Labor line item.
+ * 1. The invoice contains at shop supplies line item.
  * 2. "Shop Supplies" is not already on the invoice.
  */
 async function ensureShopSupplies(invoiceId, existingLineItems = []) {
   // 1. Check if the invoice has any Labor items
   const hasLabor = existingLineItems.some((item) => {
-    const name = (item.name || "").toLowerCase();
+   // const name = (item.name || "").toLowerCase();
     const desc = (item.description || "").toLowerCase();
-    const category = (item.category || item.product_category || "").toLowerCase();
+   // const category = (item.category || item.product_category || "").toLowerCase();
 
     return (
-      category.includes("labor") ||
-      category.includes("service") ||
-      name.includes("labor") ||
-      name.includes("service") ||
-      name.includes("diagnostic") ||
-      name.includes("repair") ||
-      desc.includes("labor")
+     // category.includes("labor") ||
+     // category.includes("service") ||
+     // name.includes("labor") ||
+     // name.includes("service") ||
+     // name.includes("diagnostic") ||
+     // name.includes("repair") ||
+      desc.includes("labor - shop supplies")
     );
   });
 
