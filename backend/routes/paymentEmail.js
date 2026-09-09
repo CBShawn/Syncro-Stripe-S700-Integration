@@ -105,7 +105,7 @@ router.post("/send-payment-email", async (req, res) => {
       customer_creation: stripeCustomerId ? undefined : 'always', // 🆕 Only create new customer if none exists
       customer_email: stripeCustomerId ? undefined : customerEmail, // 🔄 Only prefill email if no customer
       payment_intent_data: {
-        capture_method: "automatic",
+        capture_method: "manual",
         metadata: { // 🆕 Add metadata to PaymentIntent
           syncro_invoice_id: String(invoice.id),
           syncro_customer_id: String(targetCustomerId || ""),
