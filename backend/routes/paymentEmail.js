@@ -78,11 +78,39 @@ router.post("/send-payment-email", async (req, res) => {
     const currentBalance = invoice.balance_due !== undefined ? invoice.balance_due : invoice.total;
     const amountInCents = Math.round((currentBalance || amount) * 100);
 
-    // 3. Create Stripe Checkout Session with manual capture
+    // 🆕 Look up existing Stripe customer by Syncro customer ID
+    let stripeCustomerId = null;
+    if (targetCustomerId) {
+      try {
+        const existingCustomers = await stripe.customers.search({
+          query: `metadata['syncro_customer_id']:'${targetCustomerId}'`,
+          limit: 1,
+        });
+        
+        if (existingCustomers.data.length > 0) {
+          stripeCustomerId = existingCustomers.data[0].id;
+          console.log(`✅ Found existing Stripe Customer: ${stripeCustomerId}`);
+        } else {
+          console.log(`ℹ️ No existing Stripe customer found for Syncro Customer #${targetCustomerId}`);
+        }
+      } catch (err) {
+        console.warn('⚠️ Could not search for existing customer:', err.message);
+      }
+    }
+
+    // 3. Create Stripe Checkout Session with automatic capture
     console.log(`➡️ [4/5] Creating Stripe Checkout Session ($${(amountInCents / 100).toFixed(2)})...`);
     const session = await stripe.checkout.sessions.create({
-        payment_intent_data: {
+      customer: stripeCustomerId || undefined, // 🆕 Use existing customer if found
+      customer_creation: stripeCustomerId ? undefined : 'always', // 🆕 Only create new customer if none exists
+      customer_email: stripeCustomerId ? undefined : customerEmail, // 🔄 Only prefill email if no customer
+      payment_intent_data: {
         capture_method: "automatic",
+        metadata: { // 🆕 Add metadata to PaymentIntent
+          syncro_invoice_id: String(invoice.id),
+          syncro_customer_id: String(targetCustomerId || ""),
+          client_ip: callerIp,
+        },
       },
       line_items: [
         {
@@ -98,7 +126,6 @@ router.post("/send-payment-email", async (req, res) => {
         },
       ],
       mode: "payment",
-      customer_email: customerEmail,
       metadata: {
         syncro_invoice_id: String(invoice.id),
         syncro_customer_id: String(targetCustomerId || ""),
