@@ -118,14 +118,17 @@ async function createStripeInvoiceBackup(syncroInvoiceId, syncroCustomerId, paym
       }))
     }, null, 2));
     
-    // Calculate tax rate from Syncro data
-    const subtotal = parseFloat(syncroInvoice.subtotal || 0);
-    const total = parseFloat(syncroInvoice.total || 0);
-    const taxAmount = total - subtotal;
-    const taxRate = subtotal > 0 ? (taxAmount / subtotal) * 100 : 0; // Convert to percentage
-    
-    console.log(`💰 Tax calculation: subtotal=${subtotal}, total=${total}, tax=${taxAmount}, rate=${taxRate.toFixed(2)}%`);
+   // Calculate tax rate from Syncro data
+const subtotal = parseFloat(syncroInvoice.subtotal || 0);
+const total = parseFloat(syncroInvoice.total || 0);
+const taxAmount = total - subtotal;
+let taxRate = subtotal > 0 ? (taxAmount / subtotal) * 100 : 0; // Convert to percentage
 
+// Round to 4 decimal places (Stripe's maximum)
+taxRate = Math.round(taxRate * 10000) / 10000;  // ← ADD THIS LINE
+
+console.log(`💰 Tax calculation: subtotal=${subtotal}, total=${total}, tax=${taxAmount}, rate=${taxRate}%`);
+    
     // Create a tax rate if tax exists
     let taxRateId = null;
     if (taxAmount > 0.01 && taxRate > 0) {
