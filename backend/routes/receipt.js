@@ -152,17 +152,21 @@ router.get("/:invoiceId", async (req, res) => {
     // 3. Render Line Items
     const lineItems = invoice.line_items || [];
     const lineItemsHtml = lineItems
-      .map(
-        (item) => `
+      .map((item) => {
+        const price = parseFloat(item.price || 0);
+        const qty = parseFloat(item.quantity || 1);
+        const lineTotal = (price * qty).toFixed(2);
+
+        return `
       <tr>
         <td class="first item"><strong>${item.name || "Item"}</strong></td>
         <td class="description">${item.description || ""}</td>
-        <td class="unitcost">$${parseFloat(item.price || 0).toFixed(2)}</td>
-        <td class="quantity">${item.quantity || 1}</td>
-        <td class="last linetotal">$${parseFloat(item.total || 0).toFixed(2)}</td>
+        <td class="unitcost">$${price.toFixed(2)}</td>
+        <td class="quantity">${qty}</td>
+        <td class="last linetotal">$${lineTotal}</td>
       </tr>
-    `
-      )
+    `;
+      })
       .join("");
 
     // 4. Generate 80mm HTML
