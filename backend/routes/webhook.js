@@ -96,6 +96,89 @@ function buildSyncroInvoiceNote({
   return notestring;
 }
 
+/**
+ * 🆕 Helper function to create Stripe Invoice backup with line items
+ */
+async function createStripeInvoiceBackup(syncroInvoiceId, syncroCustomerId, paymentIntentId, stripeCustomerId) {
+  try {
+    console.log(`📄 Creating Stripe Invoice backup for Syncro Invoice #${syncroInvoiceId}...`);
+    
+    // Fetch the full Syncro invoice to get line items
+    const syncroInvoice = await syncro.getInvoice(syncroInvoiceId);
+    
+    // Create the invoice
+    const stripeInvoice = await stripe.invoices.create({
+      customer: stripeCustomerId,
+      collection_method: 'send_invoice',
+      days_until_due: 0,
+      metadata: {
+        syncro_invoice_id: syncroInvoiceId,
+        syncro_customer_id: syncroCustomerId,
+        stripe_payment_intent: paymentIntentId,
+      },
+    });
+
+    // Add line items from Syncro invoice
+    if (syncroInvoice && syncroInvoice.line_items && syncroInvoice.line_items.length > 0) {
+      for (const item of syncroInvoice.line_items) {
+        const itemName = item.name || item.item || 'Service';
+        const itemQty = parseFloat(item.quantity || 1);
+        const itemPrice = parseFloat(item.price || item.rate || 0);
+        
+        // Check if quantity is a whole number
+        if (Number.isInteger(itemQty)) {
+          // Use quantity and unit_amount for whole numbers
+          await stripe.invoiceItems.create({
+            customer: stripeCustomerId,
+            invoice: stripeInvoice.id,
+            description: itemName,
+            quantity: itemQty,
+            unit_amount: Math.round(itemPrice * 100), // Convert to cents
+            currency: 'usd',
+          });
+        } else {
+          // For fractional quantities (like 2.5 hours), calculate total and use amount
+          const totalAmount = itemQty * itemPrice;
+          const description = `${itemName} (${itemQty} × $${itemPrice.toFixed(2)})`;
+          
+          await stripe.invoiceItems.create({
+            customer: stripeCustomerId,
+            invoice: stripeInvoice.id,
+            description: description,
+            amount: Math.round(totalAmount * 100), // Total in cents
+            currency: 'usd',
+          });
+        }
+      }
+      console.log(`✅ Added ${syncroInvoice.line_items.length} line items to Stripe Invoice`);
+    } else {
+      // Fallback: add single line item if no line items found
+      const amountCents = Math.round(parseFloat(syncroInvoice.total || 0) * 100);
+      await stripe.invoiceItems.create({
+        customer: stripeCustomerId,
+        invoice: stripeInvoice.id,
+        amount: amountCents,
+        currency: 'usd',
+        description: `Syncro Invoice #${syncroInvoiceId}`,
+      });
+    }
+
+    // Finalize the invoice
+    await stripe.invoices.finalizeInvoice(stripeInvoice.id, { auto_advance: false });
+
+    // Mark as paid out-of-band (no new charge created)
+    await stripe.invoices.pay(stripeInvoice.id, {
+      paid_out_of_band: true,
+    });
+
+    console.log(`✅ Stripe Invoice ${stripeInvoice.id} created as backup for Syncro Invoice #${syncroInvoiceId}`);
+    return stripeInvoice;
+  } catch (invoiceErr) {
+    console.error(`⚠️ Failed to create Stripe Invoice backup for Syncro Invoice #${syncroInvoiceId}:`, invoiceErr.message);
+    return null;
+  }
+}
+
 router.post(
   "/",
   express.raw({ type: "application/json" }),
@@ -246,6 +329,17 @@ router.post(
                 await syncro.updateInvoice(pending.syncroInvoiceId, {
                   note: detailedNote,
                 });
+
+                // 🆕 Create Stripe Invoice backup for terminal payment
+                if (fullPi.customer) {
+                  await createStripeInvoiceBackup(
+                    pending.syncroInvoiceId,
+                    pending.syncroCustomerId,
+                    paymentIntentId,
+                    fullPi.customer
+                  );
+                }
+
               } catch (noteErr) {
                 console.warn(`⚠️ Could not update note on Invoice #${pending.syncroInvoiceId}:`, noteErr.message);
               }
@@ -350,6 +444,17 @@ router.post(
                   await syncro.updateInvoice(pending.syncroInvoiceId, {
                     note: detailedNote,
                   });
+
+                  // 🆕 Create Stripe Invoice backup for terminal payment (timeout case)
+                  if (fullPi.customer) {
+                    await createStripeInvoiceBackup(
+                      pending.syncroInvoiceId,
+                      pending.syncroCustomerId,
+                      pi.id,
+                      fullPi.customer
+                    );
+                  }
+
                 } catch (noteErr) {
                   console.warn(`⚠️ Could not update note on Invoice #${pending.syncroInvoiceId}:`, noteErr.message);
                 }
@@ -526,69 +631,13 @@ router.post(
                 `✅ Recorded credit card payment ($${amountString}) & note for Syncro Invoice #${syncroInvoiceId}`
               );
 
-              // ================================================================
-              // 🆕 CREATE STRIPE INVOICE AS BACKUP RECORD WITH LINE ITEMS
-              // ================================================================
-              try {
-                console.log(`📄 Creating Stripe Invoice backup for Syncro Invoice #${syncroInvoiceId}...`);
-                
-                // Fetch the full Syncro invoice to get line items
-                const syncroInvoice = await syncro.getInvoice(syncroInvoiceId);
-                
-                // Create the invoice
-                const stripeInvoice = await stripe.invoices.create({
-                  customer: session.customer,
-                  collection_method: 'send_invoice',
-                  days_until_due: 0,
-                  metadata: {
-                    syncro_invoice_id: syncroInvoiceId,
-                    syncro_customer_id: syncroCustomerId,
-                    stripe_payment_intent: paymentIntentId,
-                  },
-                });
-
-                // Add line items from Syncro invoice
-                if (syncroInvoice && syncroInvoice.line_items && syncroInvoice.line_items.length > 0) {
-                  for (const item of syncroInvoice.line_items) {
-                    const itemName = item.name || item.item || 'Service';
-                    const itemQty = item.quantity || 1;
-                    const itemPrice = item.price || item.rate || 0;
-                    
-                    await stripe.invoiceItems.create({
-                      customer: session.customer,
-                      invoice: stripeInvoice.id,
-                      description: itemName,
-                      quantity: itemQty,
-                      unit_amount: Math.round(itemPrice * 100), // Convert to cents
-                      currency: 'usd',
-                    });
-                  }
-                  console.log(`✅ Added ${syncroInvoice.line_items.length} line items to Stripe Invoice`);
-                } else {
-                  // Fallback: add single line item if no line items found
-                  await stripe.invoiceItems.create({
-                    customer: session.customer,
-                    invoice: stripeInvoice.id,
-                    amount: session.amount_total,
-                    currency: session.currency || 'usd',
-                    description: `Syncro Invoice #${syncroInvoiceId}`,
-                  });
-                }
-
-                // Finalize the invoice
-                await stripe.invoices.finalizeInvoice(stripeInvoice.id, { auto_advance: false });
-
-                // Mark as paid out-of-band (no new charge created)
-                await stripe.invoices.pay(stripeInvoice.id, {
-                  paid_out_of_band: true,
-                });
-
-                console.log(`✅ Stripe Invoice ${stripeInvoice.id} created as backup for Syncro Invoice #${syncroInvoiceId}`);
-              } catch (invoiceErr) {
-                console.error(`⚠️ Failed to create Stripe Invoice backup for Syncro Invoice #${syncroInvoiceId}:`, invoiceErr.message);
-                // Don't fail the webhook if invoice creation fails
-              }
-              // ================================================================
+              // 🆕 Create Stripe Invoice backup for online payment
+              await createStripeInvoiceBackup(
+                syncroInvoiceId,
+                syncroCustomerId,
+                paymentIntentId,
+                session.customer
+              );
 
             } catch (syncroErr) {
               console.error(
