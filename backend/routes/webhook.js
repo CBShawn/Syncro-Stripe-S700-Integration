@@ -118,16 +118,16 @@ async function createStripeInvoiceBackup(syncroInvoiceId, syncroCustomerId, paym
       }))
     }, null, 2));
     
-   // Calculate tax rate from Syncro data
-const subtotal = parseFloat(syncroInvoice.subtotal || 0);
-const total = parseFloat(syncroInvoice.total || 0);
-const taxAmount = total - subtotal;
-let taxRate = subtotal > 0 ? (taxAmount / subtotal) * 100 : 0; // Convert to percentage
+    // Calculate tax rate from Syncro data
+    const subtotal = parseFloat(syncroInvoice.subtotal || 0);
+    const total = parseFloat(syncroInvoice.total || 0);
+    const taxAmount = total - subtotal;
+    let taxRate = subtotal > 0 ? (taxAmount / subtotal) * 100 : 0; // Convert to percentage
 
-// Round to 4 decimal places (Stripe's maximum)
-taxRate = Math.round(taxRate * 10000) / 10000;  // ← ADD THIS LINE
+    // Round to 4 decimal places (Stripe's maximum)
+    taxRate = Math.round(taxRate * 10000) / 10000;
 
-console.log(`💰 Tax calculation: subtotal=${subtotal}, total=${total}, tax=${taxAmount}, rate=${taxRate}%`);
+    console.log(`💰 Tax calculation: subtotal=${subtotal}, total=${total}, tax=${taxAmount}, rate=${taxRate}%`);
     
     // Create a tax rate if tax exists
     let taxRateId = null;
@@ -305,8 +305,15 @@ router.post(
             if (pending) {
               pendingSyncroPayments.delete(String(paymentIntentId));
 
+              const hostBase = process.env.RENDER_EXTERNAL_URL || `https://${req.get("host") || "syncro-stripe-s700-integration.onrender.com"}`;
+              const baseUrl = hostBase.replace(/\/+$/, "");
+              const signatureEndpointUrl = fileId ? `${baseUrl}/api/signature/${fileId}` : null;
+
               if (base64Sig) {
                 invoiceSignatureCache.set(String(pending.syncroInvoiceId), base64Sig);
+              } else if (signatureEndpointUrl) {
+                console.log(`ℹ️ Base64 fetch was null; caching signature URL fallback: ${signatureEndpointUrl}`);
+                invoiceSignatureCache.set(String(pending.syncroInvoiceId), signatureEndpointUrl);
               }
 
               const syncroPaymentRes = await recordSyncroPayment(
@@ -338,7 +345,6 @@ router.post(
                 const pm = typeof fullPi.payment_method === "object" ? fullPi.payment_method : {};
                 const card = pm.card_present || pm.card || charge?.payment_method_details?.card_present || charge?.payment_method_details?.card || {};
 
-                const baseUrl = `https://${req.get("host") || "syncro-stripe-s700-integration.onrender.com"}`;
                 const receiptUrl = `${baseUrl}/receipt/${pending.syncroInvoiceId}`;
                 const signatureUrl = fileId ? `${baseUrl}/signature/${pending.syncroInvoiceId}` : null;
 
@@ -454,7 +460,8 @@ router.post(
                   const pm = typeof fullPi.payment_method === "object" ? fullPi.payment_method : {};
                   const card = pm.card_present || pm.card || charge?.payment_method_details?.card_present || charge?.payment_method_details?.card || {};
 
-                  const baseUrl = `https://${req.get("host") || "syncro-stripe-s700-integration.onrender.com"}`;
+                  const hostBase = process.env.RENDER_EXTERNAL_URL || `https://${req.get("host") || "syncro-stripe-s700-integration.onrender.com"}`;
+                  const baseUrl = hostBase.replace(/\/+$/, "");
                   const receiptUrl = `${baseUrl}/receipt/${pending.syncroInvoiceId}`;
 
                   const detailedNote = buildSyncroInvoiceNote({
