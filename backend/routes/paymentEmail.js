@@ -83,7 +83,7 @@ router.post("/send-payment-email", async (req, res) => {
     const session = await stripe.checkout.sessions.create({
       payment_method_types: ["card"],
       payment_intent_data: {
-        capture_method: "manual",
+        capture_method: "automatic",
       },
       line_items: [
         {
