@@ -106,6 +106,18 @@ async function createStripeInvoiceBackup(syncroInvoiceId, syncroCustomerId, paym
     // Fetch the full Syncro invoice to get line items
     const syncroInvoice = await syncro.getInvoice(syncroInvoiceId);
     
+    // 🆕 Debug log to see what Syncro returns
+    console.log(`📊 Syncro Invoice Data:`, JSON.stringify({
+      subtotal: syncroInvoice.subtotal,
+      total: syncroInvoice.total,
+      tax: syncroInvoice.tax,
+      line_items: syncroInvoice.line_items?.map(item => ({
+        name: item.name,
+        quantity: item.quantity,
+        price: item.price,
+      }))
+    }, null, 2));
+    
     // Create the invoice
     const stripeInvoice = await stripe.invoices.create({
       customer: stripeCustomerId,
@@ -151,6 +163,25 @@ async function createStripeInvoiceBackup(syncroInvoiceId, syncroCustomerId, paym
         }
       }
       console.log(`✅ Added ${syncroInvoice.line_items.length} line items to Stripe Invoice`);
+
+      // 🆕 Add tax if present
+      const subtotal = parseFloat(syncroInvoice.subtotal || 0);
+      const total = parseFloat(syncroInvoice.total || 0);
+      const taxAmount = total - subtotal;
+
+      console.log(`💰 Tax calculation: total=${total}, subtotal=${subtotal}, tax=${taxAmount}`);
+
+      if (taxAmount > 0.01) {
+        await stripe.invoiceItems.create({
+          customer: stripeCustomerId,
+          invoice: stripeInvoice.id,
+          description: 'Sales Tax',
+          amount: Math.round(taxAmount * 100), // Tax in cents
+          currency: 'usd',
+        });
+        console.log(`✅ Added tax line item: $${taxAmount.toFixed(2)}`);
+      }
+
     } else {
       // Fallback: add single line item if no line items found
       const amountCents = Math.round(parseFloat(syncroInvoice.total || 0) * 100);
