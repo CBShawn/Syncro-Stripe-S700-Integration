@@ -81,8 +81,7 @@ router.post("/send-payment-email", async (req, res) => {
     // 3. Create Stripe Checkout Session with manual capture
     console.log(`➡️ [4/5] Creating Stripe Checkout Session ($${(amountInCents / 100).toFixed(2)})...`);
     const session = await stripe.checkout.sessions.create({
-      payment_method_types: ["card"],
-      payment_intent_data: {
+        payment_intent_data: {
         capture_method: "automatic",
       },
       line_items: [
