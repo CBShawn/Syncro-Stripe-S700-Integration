@@ -376,14 +376,16 @@ router.post(
                   note: detailedNote,
                 });
 
-                // 🆕 Create Stripe Invoice backup for terminal payment
-                if (fullPi.customer) {
+                // 🆕 Only create backup invoice if payment is captured (not just authorized)
+                if (fullPi.customer && fullPi.status === 'succeeded') {
                   await createStripeInvoiceBackup(
                     pending.syncroInvoiceId,
                     pending.syncroCustomerId,
                     paymentIntentId,
                     fullPi.customer
                   );
+                } else {
+                  console.log(`⏳ Skipping backup invoice - Terminal payment not yet captured (status: ${fullPi.status})`);
                 }
 
               } catch (noteErr) {
@@ -492,14 +494,16 @@ router.post(
                     note: detailedNote,
                   });
 
-                  // 🆕 Create Stripe Invoice backup for terminal payment (timeout case)
-                  if (fullPi.customer) {
+                  // 🆕 Only create backup invoice if payment is captured (timeout case)
+                  if (fullPi.customer && fullPi.status === 'succeeded') {
                     await createStripeInvoiceBackup(
                       pending.syncroInvoiceId,
                       pending.syncroCustomerId,
                       pi.id,
                       fullPi.customer
                     );
+                  } else {
+                    console.log(`⏳ Skipping backup invoice - Terminal payment not yet captured (status: ${fullPi.status})`);
                   }
 
                 } catch (noteErr) {
@@ -678,13 +682,17 @@ router.post(
                 `✅ Recorded credit card payment ($${amountString}) & note for Syncro Invoice #${syncroInvoiceId}`
               );
 
-              // 🆕 Create Stripe Invoice backup for online payment
-              await createStripeInvoiceBackup(
-                syncroInvoiceId,
-                syncroCustomerId,
-                paymentIntentId,
-                session.customer
-              );
+              // 🆕 Only create backup invoice if payment is actually captured (not just authorized)
+              if (fullPi && fullPi.status === 'succeeded' && session.customer) {
+                await createStripeInvoiceBackup(
+                  syncroInvoiceId,
+                  syncroCustomerId,
+                  paymentIntentId,
+                  session.customer
+                );
+              } else {
+                console.log(`⏳ Skipping backup invoice - online payment not yet captured (status: ${fullPi?.status || 'unknown'})`);
+              }
 
             } catch (syncroErr) {
               console.error(
@@ -695,6 +703,33 @@ router.post(
           }
         }
       }
+
+      // ================================================================
+      // 🆕 4. PAYMENT CAPTURED -> CREATE BACKUP INVOICE
+      // ================================================================
+      if (event.type === "payment_intent.succeeded") {
+        const pi = event.data.object;
+        const metadata = pi.metadata || {};
+        
+        const syncroInvoiceId = metadata.syncro_invoice_id;
+        const syncroCustomerId = metadata.syncro_customer_id;
+        
+        // Only create backup invoice if:
+        // 1. We have Syncro invoice metadata
+        // 2. Payment has a customer
+        // 3. Payment was previously authorized (not instant capture)
+        if (syncroInvoiceId && syncroCustomerId && pi.customer) {
+          console.log(`💰 Payment captured for Invoice #${syncroInvoiceId}. Creating backup invoice...`);
+          
+          await createStripeInvoiceBackup(
+            syncroInvoiceId,
+            syncroCustomerId,
+            pi.id,
+            pi.customer
+          );
+        }
+      }
+
     } catch (handlerErr) {
       console.error("❌ Uncaught Exception inside Webhook Handler:", handlerErr);
     }
