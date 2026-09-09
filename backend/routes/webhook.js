@@ -376,17 +376,8 @@ router.post(
                   note: detailedNote,
                 });
 
-                // 🆕 Only create backup invoice if payment is captured (not just authorized)
-                if (fullPi.customer && fullPi.status === 'succeeded') {
-                  await createStripeInvoiceBackup(
-                    pending.syncroInvoiceId,
-                    pending.syncroCustomerId,
-                    paymentIntentId,
-                    fullPi.customer
-                  );
-                } else {
-                  console.log(`⏳ Skipping backup invoice - Terminal payment not yet captured (status: ${fullPi.status})`);
-                }
+                // 🆕 DON'T create backup invoice here - payment_intent.succeeded webhook will handle it
+                console.log(`⏭️ Skipping backup invoice in signature handler - will be created by payment_intent.succeeded webhook`);
 
               } catch (noteErr) {
                 console.warn(`⚠️ Could not update note on Invoice #${pending.syncroInvoiceId}:`, noteErr.message);
@@ -494,17 +485,8 @@ router.post(
                     note: detailedNote,
                   });
 
-                  // 🆕 Only create backup invoice if payment is captured (timeout case)
-                  if (fullPi.customer && fullPi.status === 'succeeded') {
-                    await createStripeInvoiceBackup(
-                      pending.syncroInvoiceId,
-                      pending.syncroCustomerId,
-                      pi.id,
-                      fullPi.customer
-                    );
-                  } else {
-                    console.log(`⏳ Skipping backup invoice - Terminal payment not yet captured (status: ${fullPi.status})`);
-                  }
+                  // 🆕 DON'T create backup invoice here - payment_intent.succeeded webhook will handle it
+                  console.log(`⏭️ Skipping backup invoice in timeout - will be created by payment_intent.succeeded webhook`);
 
                 } catch (noteErr) {
                   console.warn(`⚠️ Could not update note on Invoice #${pending.syncroInvoiceId}:`, noteErr.message);
@@ -682,17 +664,8 @@ router.post(
                 `✅ Recorded credit card payment ($${amountString}) & note for Syncro Invoice #${syncroInvoiceId}`
               );
 
-              // 🆕 Only create backup invoice if payment is actually captured (not just authorized)
-              if (fullPi && fullPi.status === 'succeeded' && session.customer) {
-                await createStripeInvoiceBackup(
-                  syncroInvoiceId,
-                  syncroCustomerId,
-                  paymentIntentId,
-                  session.customer
-                );
-              } else {
-                console.log(`⏳ Skipping backup invoice - online payment not yet captured (status: ${fullPi?.status || 'unknown'})`);
-              }
+              // 🆕 DON'T create backup invoice here - payment_intent.succeeded webhook will handle it
+              console.log(`⏭️ Skipping backup invoice in checkout.session.completed - will be created by payment_intent.succeeded webhook`);
 
             } catch (syncroErr) {
               console.error(
@@ -717,8 +690,10 @@ router.post(
         // Only create backup invoice if:
         // 1. We have Syncro invoice metadata
         // 2. Payment has a customer
-        // 3. Payment was previously authorized (not instant capture)
-        if (syncroInvoiceId && syncroCustomerId && pi.customer) {
+        // 3. This is NOT a terminal payment that's still in the pending queue (signature not collected yet)
+        const isPendingTerminal = pendingSyncroPayments.has(String(pi.id));
+        
+        if (syncroInvoiceId && syncroCustomerId && pi.customer && !isPendingTerminal) {
           console.log(`💰 Payment captured for Invoice #${syncroInvoiceId}. Creating backup invoice...`);
           
           await createStripeInvoiceBackup(
@@ -727,6 +702,8 @@ router.post(
             pi.id,
             pi.customer
           );
+        } else if (isPendingTerminal) {
+          console.log(`⏳ Skipping backup invoice - terminal payment still collecting signature`);
         }
       }
 
