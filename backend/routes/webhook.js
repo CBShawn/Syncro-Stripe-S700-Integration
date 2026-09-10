@@ -410,140 +410,137 @@ if (
     const syncroCustomerId = metadata.syncro_customer_id ? String(metadata.syncro_customer_id).trim() : null;
     const amountString = (pi.amount / 100).toFixed(2);
 
-    // 🆕 Check if this is a NEW authorization or a manual capture of existing payment
-    const isAlreadyPending = pendingSyncroPayments.has(String(pi.id));
+    // 🆕 Only trigger signature flow for NEW authorizations (not captures)
     const isNewAuthorization = event.type === "payment_intent.amount_capturable_updated";
+    const isAlreadyCaptured = pi.status === "succeeded" && pi.amount_capturable === 0;
 
-    if (syncroInvoiceId && syncroCustomerId && (isNewAuthorization || !isAlreadyPending)) {
-      // Only set up signature flow for NEW authorizations
-      if (!isAlreadyPending) {
-        pendingSyncroPayments.set(String(pi.id), {
-          syncroInvoiceId,
-          syncroCustomerId,
-          amountString,
-          paymentIntentId: pi.id,
-          readerId,
-        });
+    if (syncroInvoiceId && syncroCustomerId && isNewAuthorization && !isAlreadyCaptured) {
+      pendingSyncroPayments.set(String(pi.id), {
+        syncroInvoiceId,
+        syncroCustomerId,
+        amountString,
+        paymentIntentId: pi.id,
+        readerId,
+      });
 
-        console.log(`💳 Card authorized. Triggering S700 signature screen for PI ${pi.id}...`);
+      console.log(`💳 Card authorized. Triggering S700 signature screen for PI ${pi.id}...`);
 
-        setTimeout(async () => {
-          const pending = pendingSyncroPayments.get(String(pi.id));
-          if (pending) {
-            pendingSyncroPayments.delete(String(pi.id));
-            console.log(`⏱️ S700 Signature timeout. Posting payment to Syncro anyway...`);
+      setTimeout(async () => {
+        const pending = pendingSyncroPayments.get(String(pi.id));
+        if (pending) {
+          pendingSyncroPayments.delete(String(pi.id));
+          console.log(`⏱️ S700 Signature timeout. Posting payment to Syncro anyway...`);
 
-            const res = await recordSyncroPayment(
-              pending.syncroInvoiceId,
-              pending.syncroCustomerId,
-              pending.amountString,
-              pending.paymentIntentId,
-              null,
-              null,
-              "Stripe Terminal",
-              null
-            );
+          const res = await recordSyncroPayment(
+            pending.syncroInvoiceId,
+            pending.syncroCustomerId,
+            pending.amountString,
+            pending.paymentIntentId,
+            null,
+            null,
+            "Stripe Terminal",
+            null
+          );
 
-            invoicePaymentStatus.set(String(pending.syncroInvoiceId), {
-              status: "paid",
-              amount: pending.amountString,
-              paymentId: res?.payment?.id || null,
+          invoicePaymentStatus.set(String(pending.syncroInvoiceId), {
+            status: "paid",
+            amount: pending.amountString,
+            paymentId: res?.payment?.id || null,
+          });
+
+          try {
+            const fullPi = await stripe.paymentIntents.retrieve(pi.id, {
+              expand: ["latest_charge", "payment_method"],
             });
 
-            try {
-              const fullPi = await stripe.paymentIntents.retrieve(pi.id, {
-                expand: ["latest_charge", "payment_method"],
-              });
+            const charge = typeof fullPi.latest_charge === "object" ? fullPi.latest_charge : null;
+            const pm = typeof fullPi.payment_method === "object" ? fullPi.payment_method : {};
+            const card = pm.card_present || pm.card || charge?.payment_method_details?.card_present || charge?.payment_method_details?.card || {};
 
-              const charge = typeof fullPi.latest_charge === "object" ? fullPi.latest_charge : null;
-              const pm = typeof fullPi.payment_method === "object" ? fullPi.payment_method : {};
-              const card = pm.card_present || pm.card || charge?.payment_method_details?.card_present || charge?.payment_method_details?.card || {};
+            const hostBase = process.env.RENDER_EXTERNAL_URL || `https://${req.get("host") || "syncro-stripe-s700-integration.onrender.com"}`;
+            const baseUrl = hostBase.replace(/\/+$/, "");
+            const receiptUrl = `${baseUrl}/receipt/${pending.syncroInvoiceId}`;
 
-              const hostBase = process.env.RENDER_EXTERNAL_URL || `https://${req.get("host") || "syncro-stripe-s700-integration.onrender.com"}`;
-              const baseUrl = hostBase.replace(/\/+$/, "");
-              const receiptUrl = `${baseUrl}/receipt/${pending.syncroInvoiceId}`;
-
-              const detailedNote = buildSyncroInvoiceNote({
-                isTerminal: true,
-                resolvedClientIp: charge?.client_ip || null,
-                stripePaymentIntentId: pi.id,
-                chargeId: charge?.id || fullPi.latest_charge,
-                cardInfo: {
-                  brand: card.brand,
-                  description: card.description || card.brand,
-                  cardholder_name: card.cardholder_name || card.holder_name,
-                  last4: card.last4,
-                  funding: card.funding,
-                  issuer: card.issuer || card.network,
-                  country: card.country,
-                  exp_month: card.exp_month,
-                  exp_year: card.exp_year,
-                },
-                currency: fullPi.currency,
-                amountCents: fullPi.amount,
-                amountReceivedCents: fullPi.amount_received || fullPi.amount,
-                cleanSigFileId: null,
-                signatureUrl: null,
-                receiptUrl: receiptUrl,
-              });
-
-              await syncro.updateInvoice(pending.syncroInvoiceId, {
-                note: detailedNote,
-              });
-
-              console.log(`⏭️ Skipping backup invoice in timeout - will be created by payment_intent.succeeded webhook`);
-
-            } catch (noteErr) {
-              console.warn(`⚠️ Could not update note on Invoice #${pending.syncroInvoiceId}:`, noteErr.message);
-            }
-
-            await clearTerminalReaderDisplay(pending.readerId);
-            invoiceCustomerCache.delete(String(pending.syncroInvoiceId));
-          }
-        }, 25000);
-
-        try {
-          const signaturePayload = new URLSearchParams();
-          signaturePayload.append("inputs[0][type]", "signature");
-          signaturePayload.append("inputs[0][required]", "true");
-          signaturePayload.append(
-            "inputs[0][custom_text][title]",
-            "Work Acceptance & Card Authorization"
-          );
-          signaturePayload.append(
-            "inputs[0][custom_text][description]",
-            `Sign to authorize payment for Invoice #${syncroInvoiceId}.`
-          );
-          signaturePayload.append(
-            "inputs[0][custom_text][submit_button]",
-            "Accept & Sign"
-          );
-          signaturePayload.append(
-            "metadata[payment_intent_id]",
-            pi.id
-          );
-
-          await axios.post(
-            `https://api.stripe.com/v1/terminal/readers/${readerId}/collect_inputs`,
-            signaturePayload.toString(),
-            {
-              headers: {
-                Authorization: `Bearer ${process.env.STRIPE_SECRET_KEY}`,
-                "Content-Type": "application/x-www-form-urlencoded",
+            const detailedNote = buildSyncroInvoiceNote({
+              isTerminal: true,
+              resolvedClientIp: charge?.client_ip || null,
+              stripePaymentIntentId: pi.id,
+              chargeId: charge?.id || fullPi.latest_charge,
+              cardInfo: {
+                brand: card.brand,
+                description: card.description || card.brand,
+                cardholder_name: card.cardholder_name || card.holder_name,
+                last4: card.last4,
+                funding: card.funding,
+                issuer: card.issuer || card.network,
+                country: card.country,
+                exp_month: card.exp_month,
+                exp_year: card.exp_year,
               },
-            }
-          );
+              currency: fullPi.currency,
+              amountCents: fullPi.amount,
+              amountReceivedCents: fullPi.amount_received || fullPi.amount,
+              cleanSigFileId: null,
+              signatureUrl: null,
+              receiptUrl: receiptUrl,
+            });
 
-          console.log(`✍️ S700 Reader ${readerId} prompt active.`);
-        } catch (sigErr) {
-          console.error(
-            "❌ Failed to trigger S700 signature prompt:",
-            sigErr.response?.data || sigErr.message
-          );
+            await syncro.updateInvoice(pending.syncroInvoiceId, {
+              note: detailedNote,
+            });
+
+            console.log(`⏭️ Skipping backup invoice in timeout - will be created by payment_intent.succeeded webhook`);
+
+          } catch (noteErr) {
+            console.warn(`⚠️ Could not update note on Invoice #${pending.syncroInvoiceId}:`, noteErr.message);
+          }
+
+          await clearTerminalReaderDisplay(pending.readerId);
+          invoiceCustomerCache.delete(String(pending.syncroInvoiceId));
         }
-      } else {
-        console.log(`ℹ️ PaymentIntent ${pi.id} already has signature flow active - skipping duplicate prompt.`);
+      }, 25000);
+
+      try {
+        const signaturePayload = new URLSearchParams();
+        signaturePayload.append("inputs[0][type]", "signature");
+        signaturePayload.append("inputs[0][required]", "true");
+        signaturePayload.append(
+          "inputs[0][custom_text][title]",
+          "Work Acceptance & Card Authorization"
+        );
+        signaturePayload.append(
+          "inputs[0][custom_text][description]",
+          `Sign to authorize payment for Invoice #${syncroInvoiceId}.`
+        );
+        signaturePayload.append(
+          "inputs[0][custom_text][submit_button]",
+          "Accept & Sign"
+        );
+        signaturePayload.append(
+          "metadata[payment_intent_id]",
+          pi.id
+        );
+
+        await axios.post(
+          `https://api.stripe.com/v1/terminal/readers/${readerId}/collect_inputs`,
+          signaturePayload.toString(),
+          {
+            headers: {
+              Authorization: `Bearer ${process.env.STRIPE_SECRET_KEY}`,
+              "Content-Type": "application/x-www-form-urlencoded",
+            },
+          }
+        );
+
+        console.log(`✍️ S700 Reader ${readerId} prompt active.`);
+      } catch (sigErr) {
+        console.error(
+          "❌ Failed to trigger S700 signature prompt:",
+          sigErr.response?.data || sigErr.message
+        );
       }
+    } else if (isAlreadyCaptured) {
+      console.log(`ℹ️ PaymentIntent ${pi.id} already captured - skipping signature prompt.`);
     }
   }
 }
