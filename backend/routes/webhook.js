@@ -681,42 +681,86 @@ if (
         }
       }
 
-      // ================================================================
-      // 🆕 4. PAYMENT CAPTURED -> CREATE BACKUP INVOICE
-      // ================================================================
-      if (event.type === "payment_intent.succeeded") {
-        const pi = event.data.object;
-        const metadata = pi.metadata || {};
-        
-        const syncroInvoiceId = metadata.syncro_invoice_id;
-        const syncroCustomerId = metadata.syncro_customer_id;
-        
-        // Only create backup invoice if:
-        // 1. We have Syncro invoice metadata
-        // 2. Payment has a customer
-        // 3. This is NOT a terminal payment that's still in the pending queue (signature not collected yet)
-        const isPendingTerminal = pendingSyncroPayments.has(String(pi.id));
-        
-        if (syncroInvoiceId && syncroCustomerId && pi.customer && !isPendingTerminal) {
-          console.log(`💰 Payment captured for Invoice #${syncroInvoiceId}. Creating backup invoice...`);
-          
-          await createStripeInvoiceBackup(
-            syncroInvoiceId,
-            syncroCustomerId,
-            pi.id,
-            pi.customer
-          );
-        } else if (isPendingTerminal) {
-          console.log(`⏳ Skipping backup invoice - terminal payment still collecting signature`);
-        }
-      }
+// ================================================================
+// 🆕 4. CHARGE SUCCEEDED -> CREATE BACKUP INVOICE FOR ALL PAYMENTS
+// ================================================================
+if (event.type === "charge.succeeded") {
+  const charge = event.data.object;
+  
+  // Only create backup invoice if:
+  // 1. Charge has a customer
+  // 2. Charge does NOT already have an invoice (invoice field is null)
+  const hasCustomer = Boolean(charge.customer);
+  const hasNoInvoice = !charge.invoice;
+  
+  if (hasCustomer && hasNoInvoice) {
+    const metadata = charge.metadata || {};
+    const syncroInvoiceId = metadata.syncro_invoice_id;
+    const syncroCustomerId = metadata.syncro_customer_id;
+    
+    console.log(`💰 Charge succeeded: ${charge.id}. Creating backup invoice...`);
+    
+    // If this charge has Syncro metadata, fetch line items from Syncro
+    if (syncroInvoiceId && syncroCustomerId) {
+      await createStripeInvoiceBackup(
+        syncroInvoiceId,
+        syncroCustomerId,
+        charge.payment_intent || charge.id,
+        charge.customer
+      );
+    } else {
+      // No Syncro metadata - this is a recurring charge from Syncro's built-in billing
+      // Create a simple backup invoice
+      try {
+        const stripeInvoice = await stripe.invoices.create({
+          customer: charge.customer,
+          collection_method: 'send_invoice',
+          days_until_due: 0,
+          metadata: {
+            charge_id: charge.id,
+            source: 'syncro_recurring_billing',
+          },
+        });
 
-    } catch (handlerErr) {
+        // Add a single line item matching the charge amount
+        await stripe.invoiceItems.create({
+          customer: stripeInvoice.customer,
+          invoice: stripeInvoice.id,
+          amount: charge.amount,
+          currency: charge.currency,
+          description: charge.description || `Recurring Charge ${charge.id}`,
+        });
+
+        // Finalize the invoice
+        await stripe.invoices.finalizeInvoice(stripeInvoice.id, { auto_advance: false });
+
+        // Mark as paid out-of-band (since the charge already succeeded)
+        await stripe.invoices.pay(stripeInvoice.id, {
+          paid_out_of_band: true,
+        });
+
+        // Link the invoice back to the charge via metadata
+        await stripe.charges.update(charge.id, {
+          metadata: {
+            backup_invoice_id: stripeInvoice.id,
+          },
+        });
+
+        console.log(`✅ Backup Invoice ${stripeInvoice.id} created for recurring charge ${charge.id}`);
+      } catch (invoiceErr) {
+        console.error(`⚠️ Failed to create backup invoice for charge ${charge.id}:`, invoiceErr.message);
+      }
+    }
+  } else {
+    if (!hasCustomer) console.log(`ℹ️ Charge ${charge.id} has no customer - skipping backup invoice`);
+    if (!hasNoInvoice) console.log(`ℹ️ Charge ${charge.id} already has invoice ${charge.invoice} - skipping backup`);
+  }
+}
+ } catch (handlerErr) {
       console.error("❌ Uncaught Exception inside Webhook Handler:", handlerErr);
     }
 
     res.json({ received: true });
   }
 );
-
 module.exports = router;
